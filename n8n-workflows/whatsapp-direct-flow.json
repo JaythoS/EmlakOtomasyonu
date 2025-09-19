@@ -1,0 +1,343 @@
+{
+  "name": "WhatsApp Direct Flow - Doğru Akış",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-webhook",
+        "responseMode": "lastNode"
+      },
+      "id": "whatsapp-verify-01",
+      "name": "WhatsApp Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 100],
+      "webhookId": "whatsapp-webhook-verify"
+    },
+    {
+      "parameters": {
+        "functionCode": "// WhatsApp webhook verification\nconst challenge = $json?.query?.['hub.challenge'] || '';\nconst verifyToken = $json?.query?.['hub.verify_token'] || '';\n\n// Verify token kontrolü (isteğe bağlı)\nif (verifyToken !== 'your-verify-token' && verifyToken !== '') {\n  return [{ json: { error: 'Invalid verify token' } }];\n}\n\nreturn [{ json: { challenge } }];"
+      },
+      "id": "process-verification-01",
+      "name": "Process Verification",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 100]
+    },
+    {
+      "parameters": {
+        "responseBody": "={{$json.challenge}}",
+        "responseCode": 200
+      },
+      "id": "respond-verification-01",
+      "name": "Respond Verification",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [600, 100]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "lastNode"
+      },
+      "id": "whatsapp-message-webhook-01",
+      "name": "WhatsApp Message Webhook (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "whatsapp-webhook-post"
+    },
+    {
+      "parameters": {
+        "functionCode": "// WhatsApp mesajını parse et\nconst webhookData = $json;\n\n// Entry ve changes yapısını kontrol et\nconst entry = webhookData.entry?.[0];\nconst changes = entry?.changes?.[0];\nconst value = changes?.value;\nconst messages = value?.messages || [];\nconst contacts = value?.contacts || [];\nconst metadata = value?.metadata || {};\n\n// İlk mesajı al\nconst message = messages[0];\nif (!message) {\n  // Mesaj yoksa (status update vs.) boş dön\n  return [{ json: { skip: true, reason: 'No message found' } }];\n}\n\n// Mesaj verilerini çıkar\nconst messageData = {\n  // Meta veriler\n  phoneNumberId: metadata.phone_number_id || '',\n  displayPhoneNumber: metadata.display_phone_number || '',\n  \n  // Mesaj bilgileri\n  messageId: message.id || '',\n  from: message.from || '',\n  timestamp: message.timestamp || '',\n  type: message.type || 'text',\n  \n  // Mesaj içeriği\n  text: message.text?.body || '',\n  \n  // Müşteri bilgileri\n  customerName: contacts[0]?.profile?.name || 'Müşteri',\n  \n  // N8n için ek veriler\n  sessionId: `session_${message.from}_${new Date().toISOString().split('T')[0]}`,\n  companyId: 'default-company', // Tek şirket için sabit, çoklu şirket için dinamik\n  receivedAt: new Date().toISOString()\n};\n\nreturn [{ json: messageData }];"
+      },
+      "id": "parse-whatsapp-message-01",
+      "name": "Parse WhatsApp Message",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip-condition",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-skip-01",
+      "name": "Skip Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "responseCode": 200,
+        "responseBody": "{\"status\": \"skipped\"}"
+      },
+      "id": "respond-skip-01",
+      "name": "Respond Skip",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [800, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Basit AI cevap hazırla (şimdilik dummy, sonra gerçek AI olacak)\nconst messageData = $json;\nconst userMessage = messageData.text?.toLowerCase() || '';\n\n// Basit keyword-based cevaplar\nlet aiResponse = '';\n\nif (userMessage.includes('merhaba') || userMessage.includes('selam')) {\n  aiResponse = `Merhaba ${messageData.customerName}! Size nasıl yardımcı olabilirim? Hangi tür mülk arıyorsunuz?`;\n} else if (userMessage.includes('daire') || userMessage.includes('ev')) {\n  aiResponse = 'Harika! Hangi bölgede daire arıyorsunuz? Oda sayısı ve bütçeniz nedir?';\n} else if (userMessage.includes('villa')) {\n  aiResponse = 'Villa aramanızda size yardımcı olabilirim. Hangi bölgeyi tercih ediyorsunuz?';\n} else if (userMessage.includes('fiyat')) {\n  aiResponse = 'Fiyat bilgisi için mülkün detaylarını paylaşabilir misiniz? Size en uygun seçenekleri sunacağım.';\n} else if (userMessage.includes('randevu') || userMessage.includes('görüşme')) {\n  aiResponse = 'Tabii ki! Randevu için en uygun günü söyleyebilir misiniz? Size özel bir zaman ayıralım.';\n} else {\n  aiResponse = 'Anlıyorum. Size yardımcı olmak için daha detay verebilir misiniz? Hangi konuda bilgi istiyorsunuz?';\n}\n\n// Şirket bilgilerini ekle\naiResponse += '\\n\\n📞 İrtibat: 0212 XXX XXXX\\n🏢 ABC Emlak';\n\nreturn [{\n  json: {\n    ...messageData,\n    aiResponse: aiResponse,\n    responseType: 'text'\n  }\n}];"
+      },
+      "id": "generate-ai-response-01",
+      "name": "Generate AI Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 350]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/properties/search",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"{{ $json.text }}\",\n  \"companyId\": \"{{ $json.companyId }}\",\n  \"limit\": 3\n}"
+      },
+      "id": "search-properties-01",
+      "name": "Search Properties (Optional)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 450],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// WhatsApp API için mesaj formatını hazırla\nconst messageData = $('Generate AI Response').item.json;\nconst properties = $('Search Properties (Optional)')?.item?.json?.properties || [];\n\nlet finalResponse = messageData.aiResponse;\n\n// Eğer mülk bulunduysa, cevaba ekle\nif (properties.length > 0) {\n  finalResponse += '\\n\\n🏠 MEVCUT SEÇENEKLER:';\n  properties.slice(0, 2).forEach((property, index) => {\n    finalResponse += `\\n\\n${index + 1}. ${property.title}\\n`;\n    finalResponse += `📍 ${property.location}\\n`;\n    finalResponse += `💰 ${property.price}\\n`;\n    finalResponse += `📐 ${property.size}m² - ${property.rooms}`;\n  });\n  finalResponse += '\\n\\nDetaylar için lütfen bize ulaşın!';\n}\n\n// WhatsApp API format\nconst whatsappPayload = {\n  messaging_product: \"whatsapp\",\n  to: messageData.from,\n  type: \"text\",\n  text: {\n    body: finalResponse\n  }\n};\n\nreturn [{\n  json: {\n    whatsappPayload: whatsappPayload,\n    phoneNumberId: messageData.phoneNumberId,\n    originalMessage: messageData\n  }\n}];"
+      },
+      "id": "format-whatsapp-response-01",
+      "name": "Format WhatsApp Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $json.phoneNumberId }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "metaApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.whatsappPayload) }}"
+      },
+      "id": "send-whatsapp-message-01",
+      "name": "Send WhatsApp Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 400],
+      "credentials": {
+        "metaApi": {
+          "id": "meta-whatsapp-credentials",
+          "name": "Meta WhatsApp API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/conversations/log",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messageId\": \"{{ $('Format WhatsApp Response').item.json.originalMessage.messageId }}\",\n  \"customerId\": \"{{ $('Format WhatsApp Response').item.json.originalMessage.from }}\",\n  \"customerMessage\": \"{{ $('Format WhatsApp Response').item.json.originalMessage.text }}\",\n  \"aiResponse\": \"{{ $('Format WhatsApp Response').item.json.whatsappPayload.text.body }}\",\n  \"companyId\": \"{{ $('Format WhatsApp Response').item.json.originalMessage.companyId }}\",\n  \"sessionId\": \"{{ $('Format WhatsApp Response').item.json.originalMessage.sessionId }}\",\n  \"timestamp\": \"{{ $('Format WhatsApp Response').item.json.originalMessage.receivedAt }}\"\n}",
+        "continueOnFail": true
+      },
+      "id": "log-conversation-01",
+      "name": "Log Conversation (Optional)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 500]
+    },
+    {
+      "parameters": {
+        "responseCode": 200,
+        "responseBody": "{\"status\": \"success\"}"
+      },
+      "id": "respond-success-01",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1400, 400]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WhatsApp Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Process Verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Verification": {
+      "main": [
+        [
+          {
+            "node": "Respond Verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Message Webhook (POST)": {
+      "main": [
+        [
+          {
+            "node": "Parse WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "Skip Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Message?": {
+      "main": [
+        [
+          {
+            "node": "Respond Skip",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate AI Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Properties (Optional)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Response": {
+      "main": [
+        [
+          {
+            "node": "Format WhatsApp Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Properties (Optional)": {
+      "main": [
+        [
+          {
+            "node": "Format WhatsApp Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format WhatsApp Response": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Conversation (Optional)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "direct-v1",
+  "id": "whatsapp-direct-flow",
+  "meta": {
+    "instanceId": "localhost"
+  },
+  "tags": [
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "1",
+      "name": "WhatsApp"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "2",
+      "name": "Direct"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "3",
+      "name": "Simple"
+    }
+  ]
+}

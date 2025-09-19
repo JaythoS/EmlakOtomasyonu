@@ -1,0 +1,223 @@
+{
+  "name": "WA AI Assistant (Multi-tenant) - MVP",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "wa-ai",
+        "responseMode": "lastNode"
+      },
+      "id": "wa-verify-get-01",
+      "name": "WA Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-200, -20],
+      "webhookId": "wa-ai-verify"
+    },
+    {
+      "parameters": {
+        "functionCode": "const challenge = $json?.query?.['hub.challenge'] || '';\nreturn [{ json: { challenge } }];"
+      },
+      "id": "extract-challenge-01",
+      "name": "Extract Challenge",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [20, -20]
+    },
+    {
+      "parameters": {
+        "responseBody": "{{$json[\"challenge\"]}}",
+        "responseCode": 200
+      },
+      "id": "respond-challenge-01",
+      "name": "Respond Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [260, -20]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wa-ai",
+        "responseMode": "lastNode"
+      },
+      "id": "ai-agent-webhook-post-01",
+      "name": "AI Agent Webhook (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-200, 300],
+      "webhookId": "wa-ai-post"
+    },
+    {
+      "parameters": {
+        "functionCode": "const entry = $json.entry?.[0];\nconst change = entry?.changes?.[0]?.value;\nconst msg = change?.messages?.[0];\nreturn [{\n  json: {\n    phone_number_id: change?.metadata?.phone_number_id || '',\n    from: msg?.from || '',\n    text: (msg?.text?.body || '').toString(),\n    msgId: msg?.id || '',\n    timestamp: msg?.timestamp || ''\n  }\n}];"
+      },
+      "id": "parse-whatsapp-message-01",
+      "name": "Parse WhatsApp Message",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [20, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://YOUR-CONFIG-API/tenants?phone_number_id={{$node[\"Parse WhatsApp Message\"].json[\"phone_number_id\"]}}",
+        "responseFormat": "json",
+        "options": {
+          "redirect": {
+            "followRedirects": true
+          }
+        }
+      },
+      "id": "get-tenant-config-01",
+      "name": "Get Tenant Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "/*\n  Basit MVP: Config yoksa default değerler atar.\n  Prod'da buraya LLM çağrısı (OpenAI node) veya araçlar eklenecek.\n*/\nconst cfg = $json?.data?.[0] || $json || {};\nconst basePrompt = cfg.base_prompt || 'Emlak AI asistanısın. Kısa ve net cevap ver.';\nconst user = $node['Parse WhatsApp Message'].json.text || '';\nconst reply = `(${cfg.tenant_id || 'tenant'}) ${basePrompt}\\nSoru: ${user}\\nCevap: Talebinizi aldım, size hemen yardımcı oluyorum.`;\nreturn [{ json: { reply } }];"
+      },
+      "id": "build-ai-reply-dummy-01",
+      "name": "Build AI Reply (Dummy)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v20.0/{{$node[\"Parse WhatsApp Message\"].json[\"phone_number_id\"]}}/messages",
+        "method": "POST",
+        "responseFormat": "json",
+        "jsonParameters": true,
+        "options": {},
+        "sendHeaders": true,
+        "headerParametersJson": "={\"Authorization\":\"Bearer {{$node['Get Tenant Config'].json.data ? $node['Get Tenant Config'].json.data[0].access_token : $node['Get Tenant Config'].json.access_token}}\",\"Content-Type\":\"application/json\"}",
+        "bodyParametersJson": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{$node['Parse WhatsApp Message'].json.from}}\",\n  \"type\": \"text\",\n  \"text\": { \"body\": \"{{$node['Build AI Reply (Dummy)'].json.reply}}\" }\n}"
+      },
+      "id": "send-whatsapp-reply-01",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "responseCode": 200,
+        "responseBody": "={\"ok\":true}"
+      },
+      "id": "ack-200-01",
+      "name": "Ack 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1040, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WA Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Extract Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Challenge": {
+      "main": [
+        [
+          {
+            "node": "Respond Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent Webhook (POST)": {
+      "main": [
+        [
+          {
+            "node": "Parse WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "Get Tenant Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tenant Config": {
+      "main": [
+        [
+          {
+            "node": "Build AI Reply (Dummy)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Reply (Dummy)": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Reply": {
+      "main": [
+        [
+          {
+            "node": "Ack 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "mvp-v1",
+  "id": "wa-ai-mvp",
+  "meta": {
+    "instanceId": "localhost"
+  },
+  "tags": [
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "1",
+      "name": "WhatsApp"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "2",
+      "name": "MVP"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "3",
+      "name": "Multi-Tenant"
+    }
+  ]
+}

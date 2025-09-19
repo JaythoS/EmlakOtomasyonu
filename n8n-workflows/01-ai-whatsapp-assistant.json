@@ -1,0 +1,477 @@
+{
+  "name": "AI WhatsApp Asistan - Multi-Tenant",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-whatsapp-assistant",
+        "options": {}
+      },
+      "id": "ai-webhook-01",
+      "name": "AI Asistan Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "ai-whatsapp-assistant"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Gelen mesajı analiz et ve şirket ID'sini belirle\nconst webhookData = items[0].json;\nconst headers = items[0].headers || {};\n\n// Şirket ID'sini belirle (subdomain, header, veya query'den)\nlet companyId = '';\nif (webhookData.companyId) {\n  companyId = webhookData.companyId;\n} else if (headers['x-company-id']) {\n  companyId = headers['x-company-id'];\n} else if (webhookData.from) {\n  // Telefon numarasından şirket belirle (geçici çözüm)\n  companyId = 'default-company';\n}\n\n// WhatsApp mesaj formatını normalize et\nconst normalizedData = {\n  messageId: webhookData.id || webhookData.messageId || Date.now().toString(),\n  from: webhookData.from || webhookData.phone_number || webhookData.contacts?.[0]?.wa_id,\n  customerName: webhookData.profile?.name || webhookData.contacts?.[0]?.profile?.name || 'Müşteri',\n  message: webhookData.text?.body || webhookData.message || webhookData.messages?.[0]?.text?.body || '',\n  messageType: webhookData.type || webhookData.messages?.[0]?.type || 'text',\n  timestamp: new Date().toISOString(),\n  companyId: companyId,\n  conversationContext: webhookData.conversationContext || null\n};\n\nreturn [{ json: normalizedData }];"
+      },
+      "id": "message-parser-01",
+      "name": "Mesaj Parser",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $json.companyId }}/config",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "id": "get-company-config-01",
+      "name": "Şirket Konfigürasyonu Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [600, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $('Mesaj Parser').item.json.companyId }}/knowledge-base",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"{{ $('Mesaj Parser').item.json.message }}\",\n  \"limit\": 5,\n  \"type\": \"semantic_search\"\n}"
+      },
+      "id": "search-knowledge-base-01",
+      "name": "Bilgi Tabanı Arama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/conversations/{{ $('Mesaj Parser').item.json.from }}/history",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "qs": {
+          "companyId": "={{ $('Mesaj Parser').item.json.companyId }}",
+          "limit": "10"
+        }
+      },
+      "id": "get-conversation-history-01",
+      "name": "Konuşma Geçmişi Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI için prompt hazırla\nconst messageData = $('Mesaj Parser').item.json;\nconst companyConfig = $('Şirket Konfigürasyonu Al').item.json || {};\nconst knowledgeBase = $('Bilgi Tabanı Arama').item.json?.results || [];\nconst conversationHistory = $('Konuşma Geçmişi Al').item.json?.messages || [];\n\n// Şirket bilgileri\nconst companyInfo = companyConfig.company || {\n  name: 'Şirketimiz',\n  description: 'Müşteri hizmetleri',\n  services: ['Satış', 'Danışmanlık'],\n  contact: {\n    phone: '0212 XXX XXXX',\n    address: 'İstanbul'\n  }\n};\n\n// AI ayarları\nconst aiSettings = companyConfig.aiSettings || {\n  tone: 'professional-friendly',\n  language: 'turkish',\n  maxTokens: 500,\n  temperature: 0.7,\n  responseStyle: 'helpful-consultative'\n};\n\n// Konuşma bağlamı\nlet conversationContext = '';\nif (conversationHistory.length > 0) {\n  conversationContext = '\\n\\nÖNCEKİ KONUŞMA:\\n' + \n    conversationHistory.slice(-3).map(msg => \n      `${msg.sender === 'user' ? 'Müşteri' : 'Asistan'}: ${msg.message}`\n    ).join('\\n');\n}\n\n// İlgili bilgiler\nlet relevantInfo = '';\nif (knowledgeBase.length > 0) {\n  relevantInfo = '\\n\\nİLGİLİ BİLGİLER:\\n' + \n    knowledgeBase.map(item => `- ${item.content}`).join('\\n');\n}\n\n// Ana prompt template\nconst systemPrompt = `Sen ${companyInfo.name} şirketinin profesyonel müşteri hizmetleri asistanısın.\n\nŞİRKET BİLGİLERİ:\n- İsim: ${companyInfo.name}\n- Açıklama: ${companyInfo.description}\n- Hizmetler: ${companyInfo.services.join(', ')}\n- Telefon: ${companyInfo.contact.phone}\n- Adres: ${companyInfo.contact.address}\n\nGÖREVİN:\n1. Müşterinin ihtiyacını anla ve yardımcı ol\n2. Şirket bilgilerini kullanarak doğru cevaplar ver\n3. ${aiSettings.tone} bir tonla yaklaş\n4. Maksimum ${aiSettings.maxTokens} token kullan\n5. Gerekirse randevu almaya yönlendir\n6. Şirket dışı konularda 'Bu konuda yardımcı olamam' de\n\nDİL: ${aiSettings.language.toUpperCase()}\nSTİL: ${aiSettings.responseStyle}\n\nMÜŞTERİ: ${messageData.customerName}\nMESAJ: ${messageData.message}${conversationContext}${relevantInfo}\n\nYANIT:`;\n\nconst aiPayload = {\n  model: companyConfig.aiProvider?.model || 'gpt-3.5-turbo',\n  messages: [\n    {\n      role: 'system',\n      content: systemPrompt\n    },\n    {\n      role: 'user', \n      content: messageData.message\n    }\n  ],\n  max_tokens: aiSettings.maxTokens,\n  temperature: aiSettings.temperature,\n  user: messageData.from\n};\n\nreturn [{\n  json: {\n    ...messageData,\n    aiPayload: aiPayload,\n    companyInfo: companyInfo,\n    aiSettings: aiSettings\n  }\n}];"
+      },
+      "id": "prepare-ai-prompt-01",
+      "name": "AI Prompt Hazırla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "openai-condition",
+              "leftValue": "={{ $json.companyInfo.aiProvider?.type || 'openai' }}",
+              "rightValue": "openai",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ai-provider-router-01",
+      "name": "AI Provider Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.aiPayload) }}"
+      },
+      "id": "openai-request-01",
+      "name": "OpenAI API İsteği",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1600, 250],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $('AI Prompt Hazırla').item.json.aiPayload.model }}\",\n  \"max_tokens\": {{ $('AI Prompt Hazırla').item.json.aiPayload.max_tokens }},\n  \"messages\": {{ JSON.stringify($('AI Prompt Hazırla').item.json.aiPayload.messages) }}\n}"
+      },
+      "id": "claude-request-01",
+      "name": "Claude API İsteği",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1600, 350],
+      "credentials": {
+        "anthropicApi": {
+          "id": "claude-credentials",
+          "name": "Claude API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI cevabını işle ve formatla\nconst originalData = $('AI Prompt Hazırla').item.json;\nlet aiResponse = '';\nlet tokensUsed = 0;\nlet model = '';\n\n// OpenAI cevabı\nif ($('OpenAI API İsteği')?.item?.json) {\n  const openaiData = $('OpenAI API İsteği').item.json;\n  aiResponse = openaiData.choices?.[0]?.message?.content || 'Üzgünüm, şu anda cevap veremiyorum.';\n  tokensUsed = openaiData.usage?.total_tokens || 0;\n  model = openaiData.model || 'gpt-3.5-turbo';\n}\n\n// Claude cevabı\nif ($('Claude API İsteği')?.item?.json) {\n  const claudeData = $('Claude API İsteği').item.json;\n  aiResponse = claudeData.content?.[0]?.text || 'Üzgünüm, şu anda cevap veremiyorum.';\n  tokensUsed = claudeData.usage?.output_tokens || 0;\n  model = claudeData.model || 'claude-3-sonnet';\n}\n\n// Cevabı temizle ve formatla\naiResponse = aiResponse.trim();\n\n// Şirket bilgilerini ekle (eğer çok kısa cevapsa)\nif (aiResponse.length < 50) {\n  aiResponse += `\\n\\nDetaylı bilgi için: ${originalData.companyInfo.contact.phone}`;\n}\n\n// WhatsApp formatına dönüştür\nconst whatsappMessage = {\n  messaging_product: \"whatsapp\",\n  to: originalData.from.replace(/^\\+/, ''),\n  type: \"text\",\n  text: {\n    body: aiResponse\n  }\n};\n\n// Kaydetmek için veri\nconst logData = {\n  messageId: originalData.messageId,\n  companyId: originalData.companyId,\n  customerPhone: originalData.from,\n  customerName: originalData.customerName,\n  userMessage: originalData.message,\n  aiResponse: aiResponse,\n  tokensUsed: tokensUsed,\n  model: model,\n  timestamp: new Date().toISOString(),\n  messageType: originalData.messageType\n};\n\nreturn [{\n  json: {\n    whatsappMessage: whatsappMessage,\n    logData: logData,\n    aiResponse: aiResponse\n  }\n}];"
+      },
+      "id": "process-ai-response-01",
+      "name": "AI Cevabını İşle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1800, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppBusinessApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.whatsappMessage) }}"
+      },
+      "id": "send-whatsapp-message-01",
+      "name": "WhatsApp Mesaj Gönder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2000, 300],
+      "credentials": {
+        "whatsAppBusinessApi": {
+          "id": "whatsapp-business-credentials",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/conversations/log",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('AI Cevabını İşle').item.json.logData) }}"
+      },
+      "id": "log-conversation-01",
+      "name": "Konuşmayı Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2200, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "success-condition",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "delivery-check-01",
+      "name": "Gönderim Başarılı mı?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2400, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/analytics/message-sent",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"companyId\": \"{{ $('AI Cevabını İşle').item.json.logData.companyId }}\",\n  \"messageId\": \"{{ $json.id }}\",\n  \"status\": \"delivered\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}"
+      },
+      "id": "success-analytics-01",
+      "name": "Başarı Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2600, 250],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "message": "=Mesaj gönderme hatası: {{ $json.error?.message || 'Bilinmeyen hata' }}\\nCompany: {{ $('AI Cevabını İşle').item.json.logData.companyId }}\\nCustomer: {{ $('AI Cevabını İşle').item.json.logData.customerPhone }}",
+        "options": {}
+      },
+      "id": "error-log-01",
+      "name": "Hata Logu",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2600, 350]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Asistan Webhook": {
+      "main": [
+        [
+          {
+            "node": "Mesaj Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mesaj Parser": {
+      "main": [
+        [
+          {
+            "node": "Şirket Konfigürasyonu Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Şirket Konfigürasyonu Al": {
+      "main": [
+        [
+          {
+            "node": "Bilgi Tabanı Arama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bilgi Tabanı Arama": {
+      "main": [
+        [
+          {
+            "node": "Konuşma Geçmişi Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Konuşma Geçmişi Al": {
+      "main": [
+        [
+          {
+            "node": "AI Prompt Hazırla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Prompt Hazırla": {
+      "main": [
+        [
+          {
+            "node": "AI Provider Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Provider Router": {
+      "main": [
+        [
+          {
+            "node": "OpenAI API İsteği",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude API İsteği",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI API İsteği": {
+      "main": [
+        [
+          {
+            "node": "AI Cevabını İşle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API İsteği": {
+      "main": [
+        [
+          {
+            "node": "AI Cevabını İşle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Cevabını İşle": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Mesaj Gönder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Mesaj Gönder": {
+      "main": [
+        [
+          {
+            "node": "Konuşmayı Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Konuşmayı Kaydet": {
+      "main": [
+        [
+          {
+            "node": "Gönderim Başarılı mı?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gönderim Başarılı mı?": {
+      "main": [
+        [
+          {
+            "node": "Başarı Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hata Logu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "ai-v1",
+  "id": "ai-whatsapp-assistant",
+  "meta": {
+    "instanceId": "localhost"
+  },
+  "tags": [
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "1",
+      "name": "AI"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "2",
+      "name": "WhatsApp"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "3",
+      "name": "Multi-Tenant"
+    }
+  ]
+}

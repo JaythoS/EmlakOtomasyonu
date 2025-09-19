@@ -1,0 +1,845 @@
+{
+  "name": "AI Agent Emlak Sistemi - Hafızalı Asistan",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-agent-real-estate",
+        "options": {}
+      },
+      "id": "ai-agent-webhook-01",
+      "name": "AI Agent Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "ai-agent-real-estate"
+    },
+    {
+      "parameters": {
+        "functionCode": "// WhatsApp mesajını parse et ve müşteri ID'sini çıkar\nconst data = items[0].json;\n\nconst messageData = {\n  messageId: data.id || data.messageId || Date.now().toString(),\n  customerId: data.from || data.phone_number || data.contacts?.[0]?.wa_id,\n  customerName: data.profile?.name || data.contacts?.[0]?.profile?.name || 'Müşteri',\n  message: data.text?.body || data.message || data.messages?.[0]?.text?.body || '',\n  messageType: data.type || data.messages?.[0]?.type || 'text',\n  companyId: data.companyId || 'default-company',\n  timestamp: new Date().toISOString(),\n  sessionId: `session_${data.from || 'unknown'}_${new Date().toISOString().split('T')[0]}`\n};\n\nreturn [{ json: messageData }];"
+      },
+      "id": "parse-whatsapp-message-01",
+      "name": "WhatsApp Mesaj Parse",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "agent": {
+          "type": "conversationalAgent",
+          "maxIterations": 5,
+          "systemMessage": "Sen profesyonel bir emlak danışmanısın. Görevi:\n\n1. MÜŞTERİ İHTİYACI: Müşterinin tam ihtiyacını anla (konum, bütçe, oda sayısı, satış/kiralama)\n2. PORTFÖY ÖNERİSİ: Uygun mülkleri öner, özelliklerini detaylandır\n3. RANDEVU ALMA: Site görüşmesi için yönlendir\n4. TAKİP: Müşteri bilgilerini güncelle\n\nKURALLAR:\n- Samimi ama profesyonel ol\n- Kesin fiyat ver, tahmini deme\n- Portföydeki mülkleri öner\n- İletişim bilgisi ver\n- Maksimum 300 kelime\n\nHAFIZA: Önceki konuşmaları hatırla ve ona göre devam et."
+        },
+        "tools": [
+          {
+            "type": "supabase",
+            "name": "search_properties",
+            "description": "Mülk portföyünde arama yap. Konum, fiyat, oda sayısı gibi kriterlere göre filtrele.",
+            "operation": "rpc",
+            "table": "",
+            "rpcName": "search_properties",
+            "rpcParameters": {
+              "search_query": "={{ $parameter.query }}",
+              "company_id": "={{ $parameter.companyId }}",
+              "max_price": "={{ $parameter.maxPrice }}",
+              "min_price": "={{ $parameter.minPrice }}",
+              "location_filter": "={{ $parameter.location }}",
+              "room_count_filter": "={{ $parameter.roomCount }}",
+              "property_type_filter": "={{ $parameter.propertyType }}"
+            },
+            "placeholderDefinitions": {
+              "query": {
+                "description": "Arama terimi",
+                "type": "string"
+              },
+              "companyId": {
+                "description": "Şirket ID",
+                "type": "string"
+              },
+              "maxPrice": {
+                "description": "Maksimum fiyat",
+                "type": "number"
+              },
+              "minPrice": {
+                "description": "Minimum fiyat",
+                "type": "number"
+              },
+              "location": {
+                "description": "Lokasyon",
+                "type": "string"
+              },
+              "roomCount": {
+                "description": "Oda sayısı",
+                "type": "string"
+              },
+              "propertyType": {
+                "description": "Mülk tipi",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "supabase",
+            "name": "save_customer_info",
+            "description": "Müşteri bilgilerini kaydet veya güncelle",
+            "operation": "upsert",
+            "table": "customer_profiles",
+            "columns": {
+              "customer_id": "={{ $parameter.customerId }}",
+              "company_id": "={{ $parameter.companyId }}",
+              "name": "={{ $parameter.name }}",
+              "phone": "={{ $parameter.phone }}",
+              "preferences": "={{ $parameter.preferences }}",
+              "budget": "={{ $parameter.budget }}",
+              "location_preference": "={{ $parameter.locationPreference }}",
+              "property_type_preference": "={{ $parameter.propertyTypePreference }}",
+              "updated_at": "now()"
+            },
+            "placeholderDefinitions": {
+              "customerId": {
+                "description": "Müşteri ID (telefon)",
+                "type": "string"
+              },
+              "companyId": {
+                "description": "Şirket ID",
+                "type": "string"
+              },
+              "name": {
+                "description": "Müşteri adı",
+                "type": "string"
+              },
+              "phone": {
+                "description": "Telefon numarası",
+                "type": "string"
+              },
+              "preferences": {
+                "description": "Müşteri tercihleri",
+                "type": "string"
+              },
+              "budget": {
+                "description": "Bütçe bilgisi",
+                "type": "string"
+              },
+              "locationPreference": {
+                "description": "Lokasyon tercihi",
+                "type": "string"
+              },
+              "propertyTypePreference": {
+                "description": "Mülk tipi tercihi",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "supabase",
+            "name": "schedule_appointment",
+            "description": "Müşteri için randevu oluştur",
+            "operation": "insert",
+            "table": "appointments",
+            "columns": {
+              "customer_id": "={{ $parameter.customerId }}",
+              "company_id": "={{ $parameter.companyId }}",
+              "property_id": "={{ $parameter.propertyId }}",
+              "appointment_type": "={{ $parameter.appointmentType }}",
+              "scheduled_date": "={{ $parameter.preferredDate }}",
+              "notes": "={{ $parameter.notes }}",
+              "status": "pending",
+              "created_at": "now()"
+            },
+            "placeholderDefinitions": {
+              "customerId": {
+                "description": "Müşteri ID",
+                "type": "string"
+              },
+              "companyId": {
+                "description": "Şirket ID",
+                "type": "string"
+              },
+              "propertyId": {
+                "description": "Mülk ID (opsiyonel)",
+                "type": "string"
+              },
+              "appointmentType": {
+                "description": "Randevu tipi (site_visit, office_meeting, video_call)",
+                "type": "string"
+              },
+              "preferredDate": {
+                "description": "Tercih edilen tarih",
+                "type": "string"
+              },
+              "notes": {
+                "description": "Randevu notları",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "supabase",
+            "name": "get_property_details",
+            "description": "Belirli bir mülkün detaylı bilgilerini al",
+            "operation": "select",
+            "table": "company_properties",
+            "columns": "*",
+            "filters": {
+              "id": "eq.{{ $parameter.propertyId }}",
+              "status": "eq.active"
+            },
+            "placeholderDefinitions": {
+              "propertyId": {
+                "description": "Mülk ID",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "supabase",
+            "name": "get_conversation_history",
+            "description": "Müşterinin önceki konuşmalarını getir",
+            "operation": "select",
+            "table": "conversations",
+            "columns": "sender, message, created_at",
+            "filters": {
+              "customer_id": "eq.{{ $parameter.customerId }}",
+              "company_id": "eq.{{ $parameter.companyId }}"
+            },
+            "orderBy": "created_at.desc",
+            "limit": 10,
+            "placeholderDefinitions": {
+              "customerId": {
+                "description": "Müşteri ID",
+                "type": "string"
+              },
+              "companyId": {
+                "description": "Şirket ID",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "supabase",
+            "name": "save_conversation",
+            "description": "Konuşmayı veritabanına kaydet",
+            "operation": "insert",
+            "table": "conversations",
+            "columns": {
+              "customer_id": "={{ $parameter.customerId }}",
+              "company_id": "={{ $parameter.companyId }}",
+              "sender": "={{ $parameter.sender }}",
+              "message": "={{ $parameter.message }}",
+              "message_type": "{{ $parameter.messageType }}",
+              "session_id": "={{ $parameter.sessionId }}",
+              "created_at": "now()"
+            },
+            "placeholderDefinitions": {
+              "customerId": {
+                "description": "Müşteri ID",
+                "type": "string"
+              },
+              "companyId": {
+                "description": "Şirket ID",
+                "type": "string"
+              },
+              "sender": {
+                "description": "Gönderen (customer, ai_assistant)",
+                "type": "string"
+              },
+              "message": {
+                "description": "Mesaj içeriği",
+                "type": "string"
+              },
+              "messageType": {
+                "description": "Mesaj tipi",
+                "type": "string"
+              },
+              "sessionId": {
+                "description": "Oturum ID",
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "options": {
+          "humanMessage": "{{ $json.message }}",
+          "chatMemory": {
+            "type": "supabaseVectorStore",
+            "supabaseConfig": {
+              "tableName": "conversation_memory",
+              "queryName": "match_conversations",
+              "embeddingColumnName": "embedding",
+              "contentColumnName": "content",
+              "metadataColumnNames": ["session_id", "customer_id", "company_id", "memory_type"],
+              "filter": {
+                "session_id": "{{ $json.sessionId }}",
+                "company_id": "{{ $json.companyId }}"
+              }
+            },
+            "sessionId": "{{ $json.sessionId }}"
+          },
+          "maxTokens": 1000,
+          "temperature": 0.7
+        }
+      },
+      "id": "ai-agent-main-01",
+      "name": "AI Emlak Asistanı",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1,
+      "position": [1000, 350],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-credentials",
+          "name": "Supabase API"
+        },
+        "openAiApi": {
+          "id": "openai-credentials", 
+          "name": "OpenAI API"
+        }
+      },
+      "typeOptions": {
+        "supabaseConnection": {
+          "host": "your-project.supabase.co",
+          "database": "postgres",
+          "schema": "public",
+          "port": 5432,
+          "ssl": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI Agent cevabını işle ve WhatsApp formatına dönüştür\nconst contextData = $('AI Context Hazırla').item.json;\nconst agentResponse = items[0].json;\n\nconst messageData = contextData.messageData;\nconst aiResponse = agentResponse.output || agentResponse.text || 'Üzgünüm, şu anda size yardımcı olamıyorum.';\n\n// Telefon numarasını temizle\nconst cleanPhoneNumber = messageData.customerId.replace(/^\\+/, '');\n\n// WhatsApp mesaj formatı\nconst whatsappMessage = {\n  messaging_product: \"whatsapp\",\n  to: cleanPhoneNumber,\n  type: \"text\",\n  text: {\n    body: aiResponse\n  }\n};\n\n// Konuşma logı için veri\nconst conversationLog = {\n  conversation_id: `conv_${messageData.customerId}_${Date.now()}`,\n  customer_id: messageData.customerId,\n  company_id: messageData.companyId,\n  customer_message: messageData.message,\n  ai_response: aiResponse,\n  message_type: messageData.messageType,\n  session_id: messageData.sessionId,\n  metadata: {\n    tools_used: agentResponse.toolsUsed || [],\n    execution_time: agentResponse.executionTime || 0,\n    tokens_used: agentResponse.tokensUsed || 0\n  },\n  created_at: new Date().toISOString()\n};\n\nreturn [{\n  json: {\n    whatsappMessage: whatsappMessage,\n    conversationLog: conversationLog,\n    aiResponse: aiResponse,\n    messageData: messageData\n  }\n}];"
+      },
+      "id": "process-ai-response-01",
+      "name": "AI Cevabını İşle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1200, 350]
+    },
+    {
+      "parameters": {
+        "url": "https://your-supabase-url.supabase.co/rest/v1/conversations",
+        "httpMethod": "POST",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n  {\n    \"conversation_id\": \"{{ $json.conversationLog.conversation_id }}\",\n    \"customer_id\": \"{{ $json.conversationLog.customer_id }}\",\n    \"company_id\": \"{{ $json.conversationLog.company_id }}\",\n    \"sender\": \"customer\",\n    \"message\": \"{{ $json.conversationLog.customer_message }}\",\n    \"message_type\": \"{{ $json.conversationLog.message_type }}\",\n    \"session_id\": \"{{ $json.conversationLog.session_id }}\",\n    \"created_at\": \"{{ $json.conversationLog.created_at }}\"\n  },\n  {\n    \"conversation_id\": \"{{ $json.conversationLog.conversation_id }}_response\",\n    \"customer_id\": \"{{ $json.conversationLog.customer_id }}\",\n    \"company_id\": \"{{ $json.conversationLog.company_id }}\",\n    \"sender\": \"ai_assistant\",\n    \"message\": \"{{ $json.conversationLog.ai_response }}\",\n    \"message_type\": \"text\",\n    \"session_id\": \"{{ $json.conversationLog.session_id }}\",\n    \"metadata\": {{ JSON.stringify($json.conversationLog.metadata) }},\n    \"created_at\": \"{{ $json.conversationLog.created_at }}\"\n  }\n]"
+      },
+      "id": "save-conversation-01",
+      "name": "Konuşmayı Kaydet (Supabase)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1400, 350],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-credentials",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppBusinessApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('AI Cevabını İşle').item.json.whatsappMessage) }}"
+      },
+      "id": "send-whatsapp-response-01",
+      "name": "WhatsApp Cevap Gönder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1400, 250],
+      "credentials": {
+        "whatsAppBusinessApi": {
+          "id": "whatsapp-business-credentials",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "property-management",
+        "options": {}
+      },
+      "id": "property-webhook-01",
+      "name": "Mülk Yönetimi Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 600],
+      "webhookId": "property-management"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Mülk işlemini analiz et\nconst data = items[0].json;\nconst action = data.action; // create, update, delete, publish\n\nconst processedData = {\n  action: action,\n  propertyId: data.propertyId,\n  companyId: data.companyId,\n  property: data.property,\n  platforms: data.platforms || ['sahibinden', 'hurriyetemlak', 'emlakjet', 'zingat'],\n  timestamp: new Date().toISOString()\n};\n\nreturn [{ json: processedData }];"
+      },
+      "id": "process-property-action-01",
+      "name": "Mülk İşlemini Analiz Et",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "create-property-condition",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "create",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "property-action-router-01",
+      "name": "Mülk İşlem Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 550]
+    },
+    {
+      "parameters": {
+        "url": "https://your-supabase-url.supabase.co/rest/v1/company_properties",
+        "httpMethod": "POST",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.property) }}"
+      },
+      "id": "save-property-supabase-01",
+      "name": "Mülkü Kaydet (Supabase)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 500],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-credentials",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Platform yayını için mülkü hazırla\nconst propertyData = $('Mülk İşlemini Analiz Et').item.json;\nconst savedProperty = items[0].json;\n\nconst platforms = propertyData.platforms;\n\nreturn platforms.map(platform => ({\n  json: {\n    platform: platform,\n    property: savedProperty,\n    companyId: propertyData.companyId,\n    action: 'publish'\n  }\n}));"
+      },
+      "id": "prepare-platform-publish-01",
+      "name": "Platform Yayını Hazırla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Platform API formatını hazırla\nconst data = items[0].json;\nconst platform = data.platform;\nconst property = data.property;\n\nlet apiPayload = {};\nlet apiUrl = '';\n\n// Platform spesifik format\nswitch(platform) {\n  case 'sahibinden':\n    apiUrl = 'https://api.sahibinden.com/v1/listings';\n    apiPayload = {\n      category_id: property.property_type === 'daire' ? 13000 : 13200,\n      title: property.title,\n      description: property.description,\n      price: property.price_amount,\n      currency: 1,\n      location: {\n        city_id: 34,\n        town_id: getLocationId(property.location_district),\n        quarter_id: getLocationId(property.location_neighborhood)\n      },\n      attributes: {\n        room_count: property.room_count,\n        size_net: property.size_m2,\n        floor: property.floor_number,\n        total_floor: property.building_floors\n      }\n    };\n    break;\n    \n  case 'hurriyetemlak':\n    apiUrl = 'https://api.hurriyetemlak.com/v2/listings';\n    apiPayload = {\n      listingType: property.listing_type,\n      propertyType: property.property_type,\n      title: property.title,\n      description: property.description,\n      price: property.price_amount,\n      location: {\n        city: property.location_city,\n        district: property.location_district,\n        neighborhood: property.location_neighborhood\n      }\n    };\n    break;\n    \n  // Diğer platformlar...\n}\n\nfunction getLocationId(locationName) {\n  // Lokasyon ID mapping\n  return 1; // Placeholder\n}\n\nreturn [{\n  json: {\n    platform: platform,\n    apiUrl: apiUrl,\n    apiPayload: apiPayload,\n    property: property\n  }\n}];"
+      },
+      "id": "format-platform-api-01",
+      "name": "Platform API Formatla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1200, 500]
+    },
+    {
+      "parameters": {
+        "url": "{{ $json.apiUrl }}",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {{ $json.apiKey }}"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.apiPayload) }}"
+      },
+      "id": "publish-to-platform-01",
+      "name": "Platforma Yayınla",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1400, 500],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://your-supabase-url.supabase.co/rest/v1/property_platforms",
+        "httpMethod": "POST",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"property_id\": \"{{ $('Platform API Formatla').item.json.property.id }}\",\n  \"platform_name\": \"{{ $('Platform API Formatla').item.json.platform }}\",\n  \"platform_listing_id\": \"{{ $json.id || $json.listing_id }}\",\n  \"platform_url\": \"{{ $json.url || $json.listing_url }}\",\n  \"status\": \"{{ $json.error ? 'failed' : 'published' }}\",\n  \"published_at\": \"{{ new Date().toISOString() }}\",\n  \"error_message\": \"{{ $json.error?.message || null }}\"\n}"
+      },
+      "id": "save-platform-status-01",
+      "name": "Platform Durumunu Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1600, 500],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-credentials",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "update-property-condition",
+              "leftValue": "={{ $('Mülk İşlemini Analiz Et').item.json.action }}",
+              "rightValue": "update",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "property-update-router-01",
+      "name": "Mülk Güncelleme Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 700]
+    },
+    {
+      "parameters": {
+        "url": "https://your-supabase-url.supabase.co/rest/v1/company_properties?id=eq.{{ $json.propertyId }}",
+        "httpMethod": "PATCH",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.property) }}"
+      },
+      "id": "update-property-supabase-01",
+      "name": "Mülkü Güncelle (Supabase)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 700],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-credentials",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://your-supabase-url.supabase.co/rest/v1/property_platforms?property_id=eq.{{ $('Mülk İşlemini Analiz Et').item.json.propertyId }}&status=eq.published",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "id": "get-published-platforms-01",
+      "name": "Yayındaki Platformları Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 700],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-credentials",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Tüm platformlarda güncelleme yap\nconst updateData = $('Mülk İşlemini Analiz Et').item.json;\nconst updatedProperty = $('Mülkü Güncelle (Supabase)').item.json;\nconst publishedPlatforms = items[0].json || [];\n\nreturn publishedPlatforms.map(platform => ({\n  json: {\n    platform: platform.platform_name,\n    platformListingId: platform.platform_listing_id,\n    property: updatedProperty,\n    updateType: 'price_and_details'\n  }\n}));"
+      },
+      "id": "prepare-platform-updates-01",
+      "name": "Platform Güncellemelerini Hazırla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1200, 700]
+    },
+    {
+      "parameters": {
+        "url": "{{ getPlatformUpdateUrl($json.platform, $json.platformListingId) }}",
+        "httpMethod": "PUT",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {{ getPlatformApiKey($json.platform) }}"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(formatPlatformUpdate($json.platform, $json.property)) }}"
+      },
+      "id": "update-platform-listings-01",
+      "name": "Platform İlanlarını Güncelle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1400, 700],
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Agent Webhook": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Mesaj Parse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Mesaj Parse": {
+      "main": [
+        [
+          {
+            "node": "AI Emlak Asistanı",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Emlak Asistanı": {
+      "main": [
+        [
+          {
+            "node": "AI Cevabını İşle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Cevabını İşle": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Cevap Gönder",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Konuşmayı Kaydet (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mülk Yönetimi Webhook": {
+      "main": [
+        [
+          {
+            "node": "Mülk İşlemini Analiz Et",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mülk İşlemini Analiz Et": {
+      "main": [
+        [
+          {
+            "node": "Mülk İşlem Router",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mülk Güncelleme Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mülk İşlem Router": {
+      "main": [
+        [
+          {
+            "node": "Mülkü Kaydet (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mülkü Kaydet (Supabase)": {
+      "main": [
+        [
+          {
+            "node": "Platform Yayını Hazırla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Yayını Hazırla": {
+      "main": [
+        [
+          {
+            "node": "Platform API Formatla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform API Formatla": {
+      "main": [
+        [
+          {
+            "node": "Platforma Yayınla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platforma Yayınla": {
+      "main": [
+        [
+          {
+            "node": "Platform Durumunu Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mülk Güncelleme Router": {
+      "main": [
+        [
+          {
+            "node": "Mülkü Güncelle (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mülkü Güncelle (Supabase)": {
+      "main": [
+        [
+          {
+            "node": "Yayındaki Platformları Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Yayındaki Platformları Al": {
+      "main": [
+        [
+          {
+            "node": "Platform Güncellemelerini Hazırla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Güncellemelerini Hazırla": {
+      "main": [
+        [
+          {
+            "node": "Platform İlanlarını Güncelle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "ai-agent-v1",
+  "id": "ai-agent-real-estate",
+  "meta": {
+    "instanceId": "localhost"
+  },
+  "tags": [
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "1",
+      "name": "AI-Agent"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "2",
+      "name": "Supabase"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "3",
+      "name": "Memory"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "4",
+      "name": "Real-Estate"
+    }
+  ]
+}

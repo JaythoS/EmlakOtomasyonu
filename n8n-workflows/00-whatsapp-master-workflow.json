@@ -1,0 +1,601 @@
+{
+  "name": "WhatsApp Master Workflow - Tüm İşlemler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-master",
+        "options": {}
+      },
+      "id": "master-webhook-01",
+      "name": "Master WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "whatsapp-master"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Gelen isteğin tipini belirle\nconst data = items[0].json;\nconst headers = items[0].headers || {};\nconst query = items[0].query || {};\n\n// Hangi işlem tipini belirle\nlet operationType = 'unknown';\n\nif (data.text || data.message || data.entry) {\n  operationType = 'incoming_message';\n} else if (data.to || data.phoneNumber) {\n  operationType = 'send_message';\n} else if (query.type === 'analytics') {\n  operationType = 'analytics';\n} else if (data.trigger === 'auto_reply') {\n  operationType = 'auto_reply';\n}\n\nreturn [{\n  json: {\n    ...data,\n    operationType: operationType,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "operation-router-01",
+      "name": "İşlem Tipini Belirle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "incoming-message-condition",
+              "leftValue": "={{ $json.operationType }}",
+              "rightValue": "incoming_message",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "incoming-router-01",
+      "name": "Gelen Mesaj mı?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Gelen WhatsApp mesajını analiz et\nconst webhookData = items[0].json;\n\n// Mesaj metnini küçük harfe çevir analiz için\nconst message = (webhookData.text?.body || webhookData.message || '').toLowerCase();\n\n// Potansiyel analizi\nlet potential = 'low';\nconst highKeywords = ['acil', 'yarın', 'bugün', 'hemen', 'kesin', 'karar verdim', 'şimdi', 'ivedi'];\nconst mediumKeywords = ['arıyorum', 'istiyorum', 'bakıyorum', 'düşünüyorum', 'ilgileniyorum'];\n\nif (highKeywords.some(keyword => message.includes(keyword))) {\n  potential = 'high';\n} else if (mediumKeywords.some(keyword => message.includes(keyword))) {\n  potential = 'medium';\n}\n\n// Mülk tipi analizi\nlet propertyType = '';\nif (message.includes('villa')) propertyType = 'Villa';\nelse if (message.includes('3+1')) propertyType = '3+1 Daire';\nelse if (message.includes('2+1')) propertyType = '2+1 Daire';\nelse if (message.includes('4+1')) propertyType = '4+1 Daire';\nelse if (message.includes('1+1')) propertyType = '1+1 Daire';\nelse if (message.includes('daire')) propertyType = 'Daire';\nelse if (message.includes('ev')) propertyType = 'Ev';\nelse if (message.includes('ofis')) propertyType = 'Ofis';\nelse if (message.includes('arsa')) propertyType = 'Arsa';\n\n// Bütçe analizi\nlet budget = '';\nconst budgetMatch = (webhookData.text?.body || webhookData.message || '').match(/(\\d+(?:[.,]\\d+)?)\\s*(milyon|bin|k)\\s*(tl|lira|₺)?/gi);\nif (budgetMatch && budgetMatch.length > 0) {\n  budget = budgetMatch[0];\n}\n\n// Lokasyon analizi\nlet location = '';\nconst locations = [\n  'bahçelievler', 'kadıköy', 'şişli', 'beylikdüzü', 'büyükçekmece', \n  'beşiktaş', 'üsküdar', 'fatih', 'eminönü', 'beyoğlu', 'taksim',\n  'mecidiyeköy', 'levent', 'maslak', 'sarıyer', 'pendik', 'kartal',\n  'maltepe', 'ataşehir', 'çekmeköy', 'sancaktepe'\n];\nconst foundLocation = locations.find(loc => message.includes(loc));\nif (foundLocation) {\n  location = foundLocation.charAt(0).toUpperCase() + foundLocation.slice(1);\n}\n\n// Sistem formatına dönüştür\nconst processedData = {\n  messageId: webhookData.id || Date.now().toString(),\n  from: webhookData.from || webhookData.phone_number,\n  name: webhookData.profile?.name || webhookData.contact?.profile?.name || 'Bilinmeyen',\n  message: webhookData.text?.body || webhookData.message || '',\n  timestamp: new Date().toISOString(),\n  messageType: webhookData.type || 'text',\n  potential: potential,\n  propertyType: propertyType,\n  budget: budget,\n  location: location,\n  operationType: 'incoming_message'\n};\n\nreturn [{ json: processedData }];"
+      },
+      "id": "message-analyzer-01",
+      "name": "Mesaj Analizi",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 150]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/whatsapp/webhook",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "messageId",
+              "value": "={{ $json.messageId }}"
+            },
+            {
+              "name": "from",
+              "value": "={{ $json.from }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "messageType",
+              "value": "={{ $json.messageType }}"
+            },
+            {
+              "name": "potential",
+              "value": "={{ $json.potential }}"
+            },
+            {
+              "name": "propertyType",
+              "value": "={{ $json.propertyType }}"
+            },
+            {
+              "name": "budget",
+              "value": "={{ $json.budget }}"
+            },
+            {
+              "name": "location",
+              "value": "={{ $json.location }}"
+            }
+          ]
+        }
+      },
+      "id": "save-message-01",
+      "name": "Mesajı Sisteme Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1050, 150]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "high-potential-condition",
+              "leftValue": "={{ $json.potential }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "auto-reply-check-01",
+      "name": "Otomatik Cevap Gerekli mi?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 150]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Potansiyele göre otomatik cevap hazırla\nconst data = items[0].json;\nconst propertyType = data.propertyType || 'emlak';\nconst location = data.location || '';\nconst budget = data.budget || '';\nconst customerName = data.name || 'Değerli müşterimiz';\nconst potential = data.potential || 'low';\n\nlet message = `Merhaba ${customerName}! \\n\\n`;\n\nif (potential === 'high') {\n  message += `${propertyType} arayışınız için hemen size yardımcı olmak istiyoruz. `;\n  if (location) {\n    message += `${location} bölgesinde çok güzel seçeneklerimiz mevcut. `;\n  }\n  if (budget) {\n    message += `${budget} bütçenize uygun fırsatları en kısa sürede paylaşacağız. `;\n  }\n  message += `\\n\\n🏠 Size özel seçenekleri hazırlayıp WhatsApp üzerinden paylaşacağız.`;\n  message += `\\n📞 Acil durumlar için direkt arayabilirsiniz.`;\n  message += `\\n⏰ En geç 2 saat içinde size dönüş yapacağız!`;\n} else if (potential === 'medium') {\n  message += `${propertyType} konusunda size yardımcı olmak isteriz. `;\n  message += `Detaylı bilgi ve uygun seçenekler için en yakın zamanda sizinle iletişime geçeceğiz.\\n\\n`;\n  message += `📋 İhtiyaçlarınızı detaylandırıp size özel seçenekler sunacağız.\\n`;\n  message += `⏰ 4-6 saat içinde size dönüş yapacağız.`;\n} else {\n  message += `Mesajınız için teşekkür ederiz. Emlak konusunda size yardımcı olmak isteriz.\\n\\n`;\n  message += `📞 Detaylı bilgi almak için bizi arayabilir veya WhatsApp üzerinden yazabilirsiniz.\\n`;\n  message += `⏰ En kısa sürede size dönüş yapacağız.`;\n}\n\nreturn [{\n  json: {\n    to: data.from.replace(/^\\+/, ''),\n    message: message,\n    priority: potential,\n    autoReply: true,\n    originalData: data\n  }\n}];"
+      },
+      "id": "auto-reply-generator-01",
+      "name": "Otomatik Cevap Hazırla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1450, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "send-message-condition",
+              "leftValue": "={{ $json.operationType }}",
+              "rightValue": "send_message",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "send-message-router-01",
+      "name": "Mesaj Gönder mi?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Sistemden gelen mesaj gönderme isteğini hazırla\nconst data = items[0].json;\n\n// Telefon numarasını temizle (+ işaretini kaldır)\nconst cleanPhoneNumber = (data.to || data.phoneNumber || '').replace(/^\\+/, '');\n\n// WhatsApp Business API formatına dönüştür\nconst whatsappMessage = {\n  messaging_product: \"whatsapp\",\n  to: cleanPhoneNumber,\n  type: \"text\",\n  text: {\n    body: data.message || data.text || 'Merhaba! Size en kısa sürede dönüş yapacağız.'\n  }\n};\n\nreturn [{ json: whatsappMessage }];"
+      },
+      "id": "message-formatter-01",
+      "name": "Mesaj Formatla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppBusinessApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "whatsapp-sender-01",
+      "name": "WhatsApp API Gönder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1650, 200],
+      "credentials": {
+        "whatsAppBusinessApi": {
+          "id": "whatsapp-business-credentials",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "analytics-condition",
+              "leftValue": "={{ $json.operationType }}",
+              "rightValue": "analytics",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "analytics-router-01",
+      "name": "Analitik İşlemi mi?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 600]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/whatsapp/status",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "id": "get-messages-01",
+      "name": "Mesajları Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 600]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Gelen mesaj verilerini analiz et ve istatistik hesapla\nconst response = items[0].json;\nconst messages = response.data || [];\n\n// Bugünün tarihini al\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\n\n// Bugünkü mesajları filtrele\nconst todayMessages = messages.filter(msg => {\n  const msgDate = new Date(msg.timestamp);\n  msgDate.setHours(0, 0, 0, 0);\n  return msgDate.getTime() === today.getTime();\n});\n\n// İstatistikleri hesapla\nconst stats = {\n  // Temel sayılar\n  totalConversations: todayMessages.length,\n  totalMessages: messages.length,\n  \n  // Potansiyel analizi\n  highPotentialLeads: todayMessages.filter(m => m.potential === 'high').length,\n  mediumPotentialLeads: todayMessages.filter(m => m.potential === 'medium').length,\n  lowPotentialLeads: todayMessages.filter(m => m.potential === 'low').length,\n  \n  // Dönüt analizi\n  positiveResponses: todayMessages.filter(m => m.potential === 'high').length,\n  neutralResponses: todayMessages.filter(m => m.potential === 'medium').length,\n  negativeResponses: todayMessages.filter(m => m.potential === 'low').length,\n  \n  // Durum analizi\n  newMessages: todayMessages.filter(m => m.status === 'new').length,\n  respondedMessages: todayMessages.filter(m => m.status === 'responded').length,\n  inProgressMessages: todayMessages.filter(m => m.status === 'in_progress').length,\n  convertedMessages: todayMessages.filter(m => m.status === 'converted').length,\n  closedMessages: todayMessages.filter(m => m.status === 'closed').length,\n  \n  // Randevu ve buluşma\n  appointmentsScheduled: todayMessages.filter(m => m.status === 'converted').length,\n  meetingsArranged: todayMessages.filter(m => m.status === 'in_progress').length,\n  \n  // Mesaj tipi analizi\n  textMessages: todayMessages.filter(m => m.messageType === 'text').length,\n  imageMessages: todayMessages.filter(m => m.messageType === 'image').length,\n  voiceMessages: todayMessages.filter(m => m.messageType === 'voice').length,\n  documentMessages: todayMessages.filter(m => m.messageType === 'document').length,\n  \n  // Okunma durumu\n  readMessages: todayMessages.filter(m => m.isRead === true).length,\n  unreadMessages: todayMessages.filter(m => m.isRead === false).length,\n  \n  // En popüler mülk tipleri\n  propertyTypes: {},\n  \n  // En popüler lokasyonlar\n  locations: {},\n  \n  // Bütçe dağılımı\n  budgetRanges: {\n    'under_1m': 0,\n    '1m_3m': 0,\n    '3m_5m': 0,\n    'over_5m': 0,\n    'rental': 0,\n    'unspecified': 0\n  },\n  \n  // Zaman analizi\n  timestamp: new Date().toISOString(),\n  analysisDate: today.toISOString().split('T')[0]\n};\n\n// Mülk tipi dağılımını hesapla\ntodayMessages.forEach(msg => {\n  if (msg.propertyType) {\n    stats.propertyTypes[msg.propertyType] = (stats.propertyTypes[msg.propertyType] || 0) + 1;\n  }\n});\n\n// Lokasyon dağılımını hesapla\ntodayMessages.forEach(msg => {\n  if (msg.location) {\n    stats.locations[msg.location] = (stats.locations[msg.location] || 0) + 1;\n  }\n});\n\n// Bütçe analizi\ntodayMessages.forEach(msg => {\n  if (msg.budget) {\n    const budget = msg.budget.toLowerCase();\n    if (budget.includes('bin') || budget.includes('k')) {\n      stats.budgetRanges.rental++;\n    } else if (budget.includes('milyon')) {\n      const amount = parseFloat(budget.match(/\\d+(?:[.,]\\d+)?/)?.[0] || '0');\n      if (amount < 1) stats.budgetRanges.under_1m++;\n      else if (amount <= 3) stats.budgetRanges['1m_3m']++;\n      else if (amount <= 5) stats.budgetRanges['3m_5m']++;\n      else stats.budgetRanges.over_5m++;\n    } else {\n      stats.budgetRanges.unspecified++;\n    }\n  } else {\n    stats.budgetRanges.unspecified++;\n  }\n});\n\n// Yüzdelik hesaplamalar\nif (stats.totalConversations > 0) {\n  stats.percentages = {\n    highPotential: Math.round((stats.highPotentialLeads / stats.totalConversations) * 100),\n    mediumPotential: Math.round((stats.mediumPotentialLeads / stats.totalConversations) * 100),\n    lowPotential: Math.round((stats.lowPotentialLeads / stats.totalConversations) * 100),\n    responseRate: Math.round((stats.respondedMessages / stats.totalConversations) * 100),\n    conversionRate: Math.round((stats.convertedMessages / stats.totalConversations) * 100)\n  };\n}\n\nreturn [{ json: stats }];"
+      },
+      "id": "analytics-calculator-01",
+      "name": "İstatistik Hesapla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 600]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/analytics/save",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "save-analytics-01",
+      "name": "İstatistikleri Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1250, 600],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "success-condition",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "delivery-check-01",
+      "name": "Gönderim Başarılı mı?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1850, 200]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/whatsapp/status",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"action\": \"message_sent\",\n  \"to\": \"{{ $('Mesaj Formatla').item.json.to || $('Otomatik Cevap Hazırla').item.json.to }}\",\n  \"messageId\": \"{{ $json.id }}\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}"
+      },
+      "id": "success-notification-01",
+      "name": "Başarı Bildirimi",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2050, 150]
+    },
+    {
+      "parameters": {
+        "message": "=Mesaj gönderme hatası: {{ $json.error?.message || 'Bilinmeyen hata' }}",
+        "options": {}
+      },
+      "id": "error-log-01",
+      "name": "Hata Logu",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2050, 250]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */30 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "analytics-trigger-01",
+      "name": "Analitik Tetikleyici (30dk)",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 700]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Master WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "İşlem Tipini Belirle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "İşlem Tipini Belirle": {
+      "main": [
+        [
+          {
+            "node": "Gelen Mesaj mı?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mesaj Gönder mi?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Analitik İşlemi mi?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gelen Mesaj mı?": {
+      "main": [
+        [
+          {
+            "node": "Mesaj Analizi",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mesaj Analizi": {
+      "main": [
+        [
+          {
+            "node": "Mesajı Sisteme Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mesajı Sisteme Kaydet": {
+      "main": [
+        [
+          {
+            "node": "Otomatik Cevap Gerekli mi?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Otomatik Cevap Gerekli mi?": {
+      "main": [
+        [
+          {
+            "node": "Otomatik Cevap Hazırla",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Otomatik Cevap Hazırla": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp API Gönder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mesaj Gönder mi?": {
+      "main": [
+        [
+          {
+            "node": "Mesaj Formatla",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mesaj Formatla": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp API Gönder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp API Gönder": {
+      "main": [
+        [
+          {
+            "node": "Gönderim Başarılı mı?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analitik İşlemi mi?": {
+      "main": [
+        [
+          {
+            "node": "Mesajları Al",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mesajları Al": {
+      "main": [
+        [
+          {
+            "node": "İstatistik Hesapla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "İstatistik Hesapla": {
+      "main": [
+        [
+          {
+            "node": "İstatistikleri Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gönderim Başarılı mı?": {
+      "main": [
+        [
+          {
+            "node": "Başarı Bildirimi",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hata Logu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analitik Tetikleyici (30dk)": {
+      "main": [
+        [
+          {
+            "node": "Mesajları Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "master",
+  "id": "master",
+  "meta": {
+    "instanceId": "localhost"
+  },
+  "tags": [
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "1",
+      "name": "WhatsApp"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "2",
+      "name": "Master"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "3",
+      "name": "Analytics"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "4",
+      "name": "AutoReply"
+    }
+  ]
+}

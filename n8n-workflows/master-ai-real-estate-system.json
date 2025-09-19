@@ -1,0 +1,824 @@
+{
+  "name": "Master AI Emlak Sistemi - Tüm İşlemler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-real-estate-master",
+        "options": {}
+      },
+      "id": "master-webhook-01",
+      "name": "Master AI Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "ai-real-estate-master"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Gelen isteğin tipini belirle ve yönlendir\nconst data = items[0].json;\nconst headers = items[0].headers || {};\nconst query = items[0].query || {};\n\n// İşlem tipini belirle\nlet operationType = 'unknown';\nlet subType = '';\n\n// WhatsApp mesajı\nif (data.text || data.message || data.entry || data.messages) {\n  operationType = 'whatsapp_message';\n}\n// Mülk işlemleri\nelse if (data.propertyId || data.property || query.type === 'property') {\n  operationType = 'property_management';\n  subType = data.action || 'create'; // create, update, delete, publish\n}\n// Şirket yönetimi\nelse if (data.companyId || query.type === 'company') {\n  operationType = 'company_management';\n  subType = data.action || 'update';\n}\n// Analytics\nelse if (query.type === 'analytics') {\n  operationType = 'analytics';\n}\n// Platform entegrasyonları\nelse if (data.platform || query.type === 'platform') {\n  operationType = 'platform_integration';\n  subType = data.platform || 'all';\n}\n\n// Şirket ID'sini belirle\nlet companyId = data.companyId || headers['x-company-id'] || 'default-company';\nif (data.from && !companyId) {\n  // WhatsApp mesajından şirket belirle (telefon routing)\n  companyId = 'default-company';\n}\n\nconst processedData = {\n  ...data,\n  operationType: operationType,\n  subType: subType,\n  companyId: companyId,\n  timestamp: new Date().toISOString(),\n  requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`\n};\n\nreturn [{ json: processedData }];"
+      },
+      "id": "master-router-01",
+      "name": "Master Router",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "whatsapp-condition",
+              "leftValue": "={{ $json.operationType }}",
+              "rightValue": "whatsapp_message",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "whatsapp-router-01",
+      "name": "WhatsApp Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// WhatsApp mesajını normalize et\nconst webhookData = items[0].json;\n\nconst normalizedData = {\n  messageId: webhookData.id || webhookData.messageId || Date.now().toString(),\n  from: webhookData.from || webhookData.phone_number || webhookData.contacts?.[0]?.wa_id,\n  customerName: webhookData.profile?.name || webhookData.contacts?.[0]?.profile?.name || 'Müşteri',\n  message: webhookData.text?.body || webhookData.message || webhookData.messages?.[0]?.text?.body || '',\n  messageType: webhookData.type || webhookData.messages?.[0]?.type || 'text',\n  timestamp: new Date().toISOString(),\n  companyId: webhookData.companyId,\n  requestId: webhookData.requestId\n};\n\nreturn [{ json: normalizedData }];"
+      },
+      "id": "whatsapp-parser-01",
+      "name": "WhatsApp Parser",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 150]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $json.companyId }}/config",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "id": "get-company-config-01",
+      "name": "Şirket Konfigürasyonu Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 150],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $('WhatsApp Parser').item.json.companyId }}/properties/search",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"{{ $('WhatsApp Parser').item.json.message }}\",\n  \"limit\": 5,\n  \"type\": \"semantic_search\"\n}"
+      },
+      "id": "search-properties-01",
+      "name": "Mülk Arama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 150],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI için emlak odaklı prompt hazırla\nconst messageData = $('WhatsApp Parser').item.json;\nconst companyConfig = $('Şirket Konfigürasyonu Al').item.json || {};\nconst properties = $('Mülk Arama').item.json?.properties || [];\n\n// Şirket bilgileri\nconst companyInfo = companyConfig.company || {\n  name: 'Emlak Şirketimiz',\n  description: 'Profesyonel emlak danışmanlığı',\n  services: ['Satış', 'Kiralama', 'Değerleme'],\n  contact: {\n    phone: '0212 XXX XXXX',\n    address: 'İstanbul'\n  }\n};\n\n// Mülk önerileri\nlet propertyList = '';\nif (properties.length > 0) {\n  propertyList = '\\n\\nMEVCUT PORTFÖY SEÇENEKLERİ:\\n' + \n    properties.map(p => \n      `🏠 ${p.type} - ${p.location}\\n` +\n      `   ${p.rooms} oda, ${p.size}m², ${p.price}\\n` +\n      `   ${p.features?.join(', ') || 'Detaylar mevcut'}\\n`\n    ).join('\\n');\n}\n\n// AI System Prompt\nconst systemPrompt = `Sen ${companyInfo.name} şirketinin uzman emlak danışmanısın.\n\nŞİRKET BİLGİLERİ:\n- İsim: ${companyInfo.name}\n- Uzmanlik: ${companyInfo.services.join(', ')}\n- Telefon: ${companyInfo.contact.phone}\n- Adres: ${companyInfo.contact.address}\n\nGÖREVİN:\n1. Müşterinin emlak ihtiyacını anla (satış/kiralama, konum, bütçe, oda sayısı)\n2. Portföyden uygun mülkleri öner\n3. Fiyat, özellik ve lokasyon avantajlarını vurgula\n4. Site görüşmesi için randevu almaya yönlendir\n5. Profesyonel ama samimi bir dil kullan\n6. Maksimum 400 karakter\n\nÖNEMLİ KURALLAR:\n- Sadece portföydeki mülkleri öner\n- Kesin fiyat ver, \"yaklaşık\" deme\n- Her zaman iletişim bilgisi ver\n- Mülk özellikleri detayında ol\n\nMÜŞTERİ: ${messageData.customerName}\nMESAJ: ${messageData.message}${propertyList}\n\nYANIT:`;\n\nconst aiPayload = {\n  model: companyConfig.aiProvider?.model || 'gpt-3.5-turbo',\n  messages: [\n    {\n      role: 'system',\n      content: systemPrompt\n    },\n    {\n      role: 'user', \n      content: messageData.message\n    }\n  ],\n  max_tokens: 500,\n  temperature: 0.7,\n  user: messageData.from\n};\n\nreturn [{\n  json: {\n    ...messageData,\n    aiPayload: aiPayload,\n    companyInfo: companyInfo,\n    suggestedProperties: properties\n  }\n}];"
+      },
+      "id": "prepare-real-estate-ai-01",
+      "name": "Emlak AI Prompt Hazırla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1400, 150]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.aiPayload) }}"
+      },
+      "id": "openai-real-estate-01",
+      "name": "OpenAI Emlak AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1600, 150],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI cevabını işle ve WhatsApp formatına dönüştür\nconst originalData = $('Emlak AI Prompt Hazırla').item.json;\nconst openaiData = items[0].json;\n\nlet aiResponse = openaiData.choices?.[0]?.message?.content || 'Üzgünüm, şu anda size yardımcı olamıyorum. Lütfen daha sonra tekrar deneyin.';\n\n// Telefon numarasını temizle\nconst cleanPhoneNumber = originalData.from.replace(/^\\+/, '');\n\n// WhatsApp mesaj formatı\nconst whatsappMessage = {\n  messaging_product: \"whatsapp\",\n  to: cleanPhoneNumber,\n  type: \"text\",\n  text: {\n    body: aiResponse\n  }\n};\n\nreturn [{\n  json: {\n    whatsappMessage: whatsappMessage,\n    aiResponse: aiResponse,\n    originalData: originalData,\n    tokensUsed: openaiData.usage?.total_tokens || 0\n  }\n}];"
+      },
+      "id": "process-real-estate-response-01",
+      "name": "Emlak AI Cevabını İşle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1800, 150]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppBusinessApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.whatsappMessage) }}"
+      },
+      "id": "send-whatsapp-01",
+      "name": "WhatsApp Gönder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2000, 150],
+      "credentials": {
+        "whatsAppBusinessApi": {
+          "id": "whatsapp-business-credentials",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "property-condition",
+              "leftValue": "={{ $('Master Router').item.json.operationType }}",
+              "rightValue": "property_management",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "property-router-01",
+      "name": "Mülk Yönetimi Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Mülk işlemini analiz et ve platform listesini hazırla\nconst data = items[0].json;\nconst action = data.subType; // create, update, delete, publish\n\n// Desteklenen emlak platformları\nconst platforms = [\n  {\n    name: 'sahibinden',\n    displayName: 'Sahibinden.com',\n    apiUrl: 'https://api.sahibinden.com/v1',\n    active: true,\n    requiresAuth: true\n  },\n  {\n    name: 'hurriyetemlak',\n    displayName: 'Hürriyet Emlak',\n    apiUrl: 'https://api.hurriyetemlak.com/v2',\n    active: true,\n    requiresAuth: true\n  },\n  {\n    name: 'emlakjet',\n    displayName: 'EmlakJet',\n    apiUrl: 'https://api.emlakjet.com/v1',\n    active: true,\n    requiresAuth: true\n  },\n  {\n    name: 'zingat',\n    displayName: 'Zingat',\n    apiUrl: 'https://api.zingat.com/v1',\n    active: true,\n    requiresAuth: true\n  },\n  {\n    name: 'endeksa',\n    displayName: 'Endeksa',\n    apiUrl: 'https://api.endeksa.com/v1',\n    active: true,\n    requiresAuth: true\n  }\n];\n\n// Mülk verisini normalize et\nconst property = {\n  id: data.propertyId || data.property?.id,\n  companyId: data.companyId,\n  title: data.property?.title || '',\n  description: data.property?.description || '',\n  type: data.property?.type || 'daire', // daire, villa, işyeri, arsa\n  category: data.property?.category || 'satilik', // satilik, kiralik\n  location: {\n    city: data.property?.location?.city || 'İstanbul',\n    district: data.property?.location?.district || '',\n    neighborhood: data.property?.location?.neighborhood || '',\n    address: data.property?.location?.address || ''\n  },\n  details: {\n    rooms: data.property?.details?.rooms || '2+1',\n    size: data.property?.details?.size || 100,\n    floor: data.property?.details?.floor || 1,\n    totalFloors: data.property?.details?.totalFloors || 5,\n    buildingAge: data.property?.details?.buildingAge || 0,\n    furnished: data.property?.details?.furnished || false\n  },\n  price: {\n    amount: data.property?.price?.amount || 0,\n    currency: data.property?.price?.currency || 'TRY',\n    type: data.property?.price?.type || 'total' // total, m2\n  },\n  features: data.property?.features || [],\n  images: data.property?.images || [],\n  contact: {\n    name: data.property?.contact?.name || '',\n    phone: data.property?.contact?.phone || '',\n    email: data.property?.contact?.email || ''\n  },\n  platforms: data.property?.platforms || {}, // Hangi platformlarda yayında\n  lastUpdated: new Date().toISOString()\n};\n\nreturn [{\n  json: {\n    action: action,\n    property: property,\n    platforms: platforms,\n    companyId: data.companyId,\n    requestId: data.requestId\n  }\n}];"
+      },
+      "id": "process-property-data-01",
+      "name": "Mülk Verilerini İşle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "create-condition",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "create",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "property-action-router-01",
+      "name": "Mülk İşlem Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 350]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $json.companyId }}/properties",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.property) }}"
+      },
+      "id": "save-property-01",
+      "name": "Mülkü Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Her platform için ayrı publication node'u oluştur\nconst data = items[0].json;\nconst platforms = data.platforms.filter(p => p.active);\n\nreturn platforms.map(platform => ({\n  json: {\n    ...data,\n    currentPlatform: platform,\n    platformName: platform.name\n  }\n}));"
+      },
+      "id": "split-platforms-01",
+      "name": "Platformları Ayır",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Platform spesifik formatlamayı yap\nconst data = items[0].json;\nconst platform = data.currentPlatform;\nconst property = data.property;\n\nlet platformPayload = {};\n\nswitch(platform.name) {\n  case 'sahibinden':\n    platformPayload = {\n      category_id: property.type === 'daire' ? 13000 : 13200,\n      title: property.title,\n      description: property.description,\n      price: property.price.amount,\n      currency: 1, // TRY\n      location: {\n        city_id: 34, // İstanbul\n        town_id: 1, // Belirlenmeli\n        quarter_id: 1 // Belirlenmeli\n      },\n      attributes: {\n        room_count: property.details.rooms,\n        size_net: property.details.size,\n        floor: property.details.floor,\n        total_floor: property.details.totalFloors,\n        building_age: property.details.buildingAge\n      },\n      images: property.images\n    };\n    break;\n\n  case 'hurriyetemlak':\n    platformPayload = {\n      listingType: property.category === 'satilik' ? 'sale' : 'rent',\n      propertyType: property.type,\n      title: property.title,\n      description: property.description,\n      price: property.price.amount,\n      location: {\n        city: property.location.city,\n        district: property.location.district,\n        neighborhood: property.location.neighborhood\n      },\n      details: {\n        roomCount: property.details.rooms,\n        netArea: property.details.size,\n        floor: property.details.floor,\n        totalFloors: property.details.totalFloors,\n        buildingAge: property.details.buildingAge\n      },\n      images: property.images\n    };\n    break;\n\n  case 'emlakjet':\n    platformPayload = {\n      ad_type: property.category === 'satilik' ? 'sale' : 'rental',\n      property_type: property.type,\n      title: property.title,\n      content: property.description,\n      price: property.price.amount,\n      location: {\n        city_name: property.location.city,\n        district_name: property.location.district,\n        quarter_name: property.location.neighborhood\n      },\n      property_details: {\n        room: property.details.rooms,\n        net_area: property.details.size,\n        floor: property.details.floor,\n        total_floor: property.details.totalFloors,\n        age: property.details.buildingAge\n      },\n      photos: property.images\n    };\n    break;\n\n  case 'zingat':\n    platformPayload = {\n      type: property.category,\n      category: property.type,\n      title: property.title,\n      description: property.description,\n      price: property.price.amount,\n      address: {\n        city: property.location.city,\n        district: property.location.district,\n        neighborhood: property.location.neighborhood\n      },\n      specifications: {\n        rooms: property.details.rooms,\n        area: property.details.size,\n        floor: property.details.floor,\n        totalFloor: property.details.totalFloors,\n        age: property.details.buildingAge\n      },\n      images: property.images\n    };\n    break;\n\n  case 'endeksa':\n    platformPayload = {\n      category: property.category,\n      type: property.type,\n      title: property.title,\n      description: property.description,\n      price: property.price.amount,\n      location: {\n        city: property.location.city,\n        district: property.location.district,\n        neighborhood: property.location.neighborhood\n      },\n      attributes: {\n        room_count: property.details.rooms,\n        net_size: property.details.size,\n        floor_number: property.details.floor,\n        building_floors: property.details.totalFloors,\n        building_age: property.details.buildingAge\n      },\n      images: property.images\n    };\n    break;\n}\n\nreturn [{\n  json: {\n    platform: platform,\n    payload: platformPayload,\n    property: property,\n    companyId: data.companyId\n  }\n}];"
+      },
+      "id": "format-platform-data-01",
+      "name": "Platform Formatla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $json.platform.apiUrl }}/listings",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {{ $json.platform.apiKey }}",
+            "User-Agent": "EmlakOtomasyon/1.0"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "publish-to-platform-01",
+      "name": "Platforma Yayınla",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1800, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// Platform yayın sonucunu işle\nconst data = $('Platform Formatla').item.json;\nconst response = items[0].json;\n\nconst result = {\n  companyId: data.companyId,\n  propertyId: data.property.id,\n  platform: data.platform.name,\n  platformDisplayName: data.platform.displayName,\n  status: response.error ? 'failed' : 'published',\n  platformId: response.id || response.listing_id || response.ad_id || null,\n  platformUrl: response.url || response.listing_url || null,\n  error: response.error?.message || null,\n  publishedAt: new Date().toISOString(),\n  response: response\n};\n\nreturn [{ json: result }];"
+      },
+      "id": "process-platform-result-01",
+      "name": "Platform Sonucunu İşle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/properties/{{ $('Platform Formatla').item.json.property.id }}/platforms",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "save-platform-result-01",
+      "name": "Platform Sonucunu Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2200, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "update-condition",
+              "leftValue": "={{ $('Mülk Verilerini İşle').item.json.action }}",
+              "rightValue": "update",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "property-update-router-01",
+      "name": "Mülk Güncelleme Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/properties/{{ $json.property.id }}",
+        "httpMethod": "PUT",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.property) }}"
+      },
+      "id": "update-property-01",
+      "name": "Mülkü Güncelle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 500]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/properties/{{ $('Mülk Verilerini İşle').item.json.property.id }}/platforms",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "id": "get-existing-platforms-01",
+      "name": "Mevcut Platform Listesi Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1400, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Mevcut platformları güncelle\nconst updateData = $('Mülk Verilerini İşle').item.json;\nconst existingPlatforms = items[0].json.platforms || [];\n\n// Her platform için güncelleme payload'ı hazırla\nreturn existingPlatforms.filter(p => p.status === 'published').map(platform => ({\n  json: {\n    property: updateData.property,\n    platform: {\n      name: platform.platform,\n      platformId: platform.platformId,\n      apiUrl: getApiUrl(platform.platform) // Helper function\n    },\n    updateType: 'price_update', // or 'full_update'\n    companyId: updateData.companyId\n  }\n}));\n\nfunction getApiUrl(platformName) {\n  const urls = {\n    'sahibinden': 'https://api.sahibinden.com/v1',\n    'hurriyetemlak': 'https://api.hurriyetemlak.com/v2',\n    'emlakjet': 'https://api.emlakjet.com/v1',\n    'zingat': 'https://api.zingat.com/v1',\n    'endeksa': 'https://api.endeksa.com/v1'\n  };\n  return urls[platformName] || '';\n}"
+      },
+      "id": "prepare-platform-updates-01",
+      "name": "Platform Güncellemelerini Hazırla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1600, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Platform spesifik güncelleme formatla\nconst data = items[0].json;\n\nlet updatePayload = {};\n\nswitch(data.platform.name) {\n  case 'sahibinden':\n    updatePayload = {\n      price: data.property.price.amount,\n      title: data.property.title,\n      description: data.property.description\n    };\n    break;\n    \n  case 'hurriyetemlak':\n    updatePayload = {\n      price: data.property.price.amount,\n      title: data.property.title,\n      description: data.property.description\n    };\n    break;\n    \n  case 'emlakjet':\n    updatePayload = {\n      price: data.property.price.amount,\n      title: data.property.title,\n      content: data.property.description\n    };\n    break;\n    \n  case 'zingat':\n    updatePayload = {\n      price: data.property.price.amount,\n      title: data.property.title,\n      description: data.property.description\n    };\n    break;\n    \n  case 'endeksa':\n    updatePayload = {\n      price: data.property.price.amount,\n      title: data.property.title,\n      description: data.property.description\n    };\n    break;\n}\n\nreturn [{\n  json: {\n    ...data,\n    updatePayload: updatePayload\n  }\n}];"
+      },
+      "id": "format-platform-update-01",
+      "name": "Platform Güncelleme Formatla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1800, 500]
+    },
+    {
+      "parameters": {
+        "url": "{{ $json.platform.apiUrl }}/listings/{{ $json.platform.platformId }}",
+        "httpMethod": "PUT",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {{ $json.platform.apiKey }}"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.updatePayload) }}"
+      },
+      "id": "update-platform-listing-01",
+      "name": "Platform İlanını Güncelle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2000, 500],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */30 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "analytics-cron-01",
+      "name": "Analytics Cron (30dk)",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [200, 700]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/active",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "id": "get-companies-for-analytics-01",
+      "name": "Analytics İçin Şirketleri Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [400, 700]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Her şirket için analytics hesapla\nconst companies = items[0].json.companies || [];\n\nreturn companies.map(company => ({\n  json: {\n    companyId: company.id,\n    companyName: company.name\n  }\n}));"
+      },
+      "id": "split-companies-analytics-01",
+      "name": "Analytics Şirketleri Ayır",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 700]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/analytics/{{ $json.companyId }}/calculate",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"period\": \"today\",\n  \"includeConversations\": true,\n  \"includeProperties\": true,\n  \"includePlatforms\": true\n}"
+      },
+      "id": "calculate-company-analytics-01",
+      "name": "Şirket Analytics Hesapla",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 700],
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Master AI Webhook": {
+      "main": [
+        [
+          {
+            "node": "Master Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Master Router": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Router",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mülk Yönetimi Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Router": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Parser",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "WhatsApp Parser": {
+      "main": [
+        [
+          {
+            "node": "Şirket Konfigürasyonu Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Şirket Konfigürasyonu Al": {
+      "main": [
+        [
+          {
+            "node": "Mülk Arama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mülk Arama": {
+      "main": [
+        [
+          {
+            "node": "Emlak AI Prompt Hazırla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emlak AI Prompt Hazırla": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Emlak AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Emlak AI": {
+      "main": [
+        [
+          {
+            "node": "Emlak AI Cevabını İşle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emlak AI Cevabını İşle": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Gönder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mülk Yönetimi Router": {
+      "main": [
+        [
+          {
+            "node": "Mülk Verilerini İşle",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mülk Verilerini İşle": {
+      "main": [
+        [
+          {
+            "node": "Mülk İşlem Router",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mülk Güncelleme Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mülk İşlem Router": {
+      "main": [
+        [
+          {
+            "node": "Mülkü Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mülkü Kaydet": {
+      "main": [
+        [
+          {
+            "node": "Platformları Ayır",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platformları Ayır": {
+      "main": [
+        [
+          {
+            "node": "Platform Formatla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Formatla": {
+      "main": [
+        [
+          {
+            "node": "Platforma Yayınla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platforma Yayınla": {
+      "main": [
+        [
+          {
+            "node": "Platform Sonucunu İşle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Sonucunu İşle": {
+      "main": [
+        [
+          {
+            "node": "Platform Sonucunu Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mülk Güncelleme Router": {
+      "main": [
+        [
+          {
+            "node": "Mülkü Güncelle",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mülkü Güncelle": {
+      "main": [
+        [
+          {
+            "node": "Mevcut Platform Listesi Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mevcut Platform Listesi Al": {
+      "main": [
+        [
+          {
+            "node": "Platform Güncellemelerini Hazırla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Güncellemelerini Hazırla": {
+      "main": [
+        [
+          {
+            "node": "Platform Güncelleme Formatla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Güncelleme Formatla": {
+      "main": [
+        [
+          {
+            "node": "Platform İlanını Güncelle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analytics Cron (30dk)": {
+      "main": [
+        [
+          {
+            "node": "Analytics İçin Şirketleri Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analytics İçin Şirketleri Al": {
+      "main": [
+        [
+          {
+            "node": "Analytics Şirketleri Ayır",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analytics Şirketleri Ayır": {
+      "main": [
+        [
+          {
+            "node": "Şirket Analytics Hesapla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "master-v1",
+  "id": "master-ai-real-estate",
+  "meta": {
+    "instanceId": "localhost"
+  },
+  "tags": [
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "1",
+      "name": "AI"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "2",
+      "name": "Real-Estate"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "3",
+      "name": "Multi-Platform"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "4",
+      "name": "Master"
+    }
+  ]
+}

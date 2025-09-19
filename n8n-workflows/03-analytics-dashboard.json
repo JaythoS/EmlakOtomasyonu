@@ -1,0 +1,348 @@
+{
+  "name": "AI Asistan Analytics ve Dashboard",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */15 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "analytics-cron-01",
+      "name": "Analytics Tetikleyici (15dk)",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/active",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "id": "get-active-companies-01",
+      "name": "Aktif Şirketleri Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Her şirket için ayrı analytics hesapla\nconst companies = items[0].json.companies || [];\n\nreturn companies.map(company => ({\n  json: {\n    companyId: company.id,\n    companyName: company.name,\n    subscriptionPlan: company.subscriptionPlan,\n    timezone: company.timezone || 'Europe/Istanbul'\n  }\n}));"
+      },
+      "id": "split-companies-01",
+      "name": "Şirketleri Ayır",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/conversations/{{ $json.companyId }}/analytics",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "qs": {
+          "period": "today",
+          "timezone": "={{ $json.timezone }}"
+        }
+      },
+      "id": "get-conversation-analytics-01",
+      "name": "Konuşma Analitikleri Al",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Detaylı analytics hesapla\nconst companyData = items[0].json;\nconst analyticsData = items[1].json || {};\nconst messages = analyticsData.messages || [];\n\n// Bugünün tarih bilgisi\nconst now = new Date();\nconst today = new Date(now.toDateString());\nconst yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);\n\n// Bugünkü mesajları filtrele\nconst todayMessages = messages.filter(msg => {\n  const msgDate = new Date(msg.timestamp);\n  return msgDate >= today;\n});\n\n// Dünkü mesajları filtrele (karşılaştırma için)\nconst yesterdayMessages = messages.filter(msg => {\n  const msgDate = new Date(msg.timestamp);\n  return msgDate >= yesterday && msgDate < today;\n});\n\n// Temel istatistikler\nconst stats = {\n  companyId: companyData.companyId,\n  companyName: companyData.companyName,\n  date: today.toISOString().split('T')[0],\n  timestamp: now.toISOString(),\n  \n  // Mesaj sayıları\n  totalMessages: todayMessages.length,\n  totalConversations: [...new Set(todayMessages.map(m => m.customerPhone))].length,\n  aiResponses: todayMessages.filter(m => m.sender === 'ai').length,\n  \n  // Müşteri analizi\n  newCustomers: todayMessages.filter(m => m.isNewCustomer).length,\n  returningCustomers: todayMessages.filter(m => !m.isNewCustomer).length,\n  \n  // Sentiment analizi\n  positiveMessages: todayMessages.filter(m => m.sentiment === 'positive').length,\n  neutralMessages: todayMessages.filter(m => m.sentiment === 'neutral').length,\n  negativeMessages: todayMessages.filter(m => m.sentiment === 'negative').length,\n  \n  // Intent analizi\n  inquiryMessages: todayMessages.filter(m => m.intent === 'inquiry').length,\n  supportMessages: todayMessages.filter(m => m.intent === 'support').length,\n  bookingMessages: todayMessages.filter(m => m.intent === 'booking').length,\n  complaintMessages: todayMessages.filter(m => m.intent === 'complaint').length,\n  \n  // Response time analizi\n  avgResponseTime: 0,\n  fastResponses: 0, // <30 saniye\n  normalResponses: 0, // 30s-5dk\n  slowResponses: 0, // >5dk\n  \n  // AI performans\n  aiSuccessRate: 0,\n  escalatedToHuman: todayMessages.filter(m => m.escalatedToHuman).length,\n  customerSatisfaction: 0,\n  \n  // Conversion metrics\n  leadsGenerated: todayMessages.filter(m => m.isLead).length,\n  appointmentsBooked: todayMessages.filter(m => m.appointmentBooked).length,\n  salesMade: todayMessages.filter(m => m.saleMade).length,\n  \n  // Token kullanımı\n  totalTokensUsed: todayMessages.reduce((sum, m) => sum + (m.tokensUsed || 0), 0),\n  avgTokensPerMessage: 0,\n  estimatedCost: 0,\n  \n  // Mesaj tipleri\n  textMessages: todayMessages.filter(m => m.messageType === 'text').length,\n  imageMessages: todayMessages.filter(m => m.messageType === 'image').length,\n  voiceMessages: todayMessages.filter(m => m.messageType === 'voice').length,\n  documentMessages: todayMessages.filter(m => m.messageType === 'document').length,\n  \n  // Zaman dağılımı\n  hourlyDistribution: {},\n  \n  // Karşılaştırma (dünle)\n  comparison: {\n    messagesChange: 0,\n    conversationsChange: 0,\n    responseTimeChange: 0\n  }\n};\n\n// Response time hesapla\nconst responseTimeData = todayMessages.filter(m => m.responseTime).map(m => m.responseTime);\nif (responseTimeData.length > 0) {\n  stats.avgResponseTime = responseTimeData.reduce((sum, rt) => sum + rt, 0) / responseTimeData.length;\n  stats.fastResponses = responseTimeData.filter(rt => rt < 30).length;\n  stats.normalResponses = responseTimeData.filter(rt => rt >= 30 && rt < 300).length;\n  stats.slowResponses = responseTimeData.filter(rt => rt >= 300).length;\n}\n\n// Token ortalama\nif (stats.aiResponses > 0) {\n  stats.avgTokensPerMessage = stats.totalTokensUsed / stats.aiResponses;\n  // OpenAI fiyatlandırması (örnek: $0.002/1K token)\n  stats.estimatedCost = (stats.totalTokensUsed / 1000) * 0.002;\n}\n\n// AI success rate\nconst aiMessages = todayMessages.filter(m => m.sender === 'ai');\nif (aiMessages.length > 0) {\n  const successfulAI = aiMessages.filter(m => !m.escalatedToHuman && m.customerSatisfied !== false);\n  stats.aiSuccessRate = (successfulAI.length / aiMessages.length) * 100;\n}\n\n// Saatlik dağılım\nfor (let hour = 0; hour < 24; hour++) {\n  stats.hourlyDistribution[hour] = todayMessages.filter(m => {\n    const msgHour = new Date(m.timestamp).getHours();\n    return msgHour === hour;\n  }).length;\n}\n\n// Dünkü verilerle karşılaştırma\nstats.comparison.messagesChange = ((todayMessages.length - yesterdayMessages.length) / (yesterdayMessages.length || 1)) * 100;\nstats.comparison.conversationsChange = ((stats.totalConversations - [...new Set(yesterdayMessages.map(m => m.customerPhone))].length) / ([...new Set(yesterdayMessages.map(m => m.customerPhone))].length || 1)) * 100;\n\n// Müşteri memnuniyeti hesapla\nconst satisfactionRatings = todayMessages.filter(m => m.customerRating).map(m => m.customerRating);\nif (satisfactionRatings.length > 0) {\n  stats.customerSatisfaction = satisfactionRatings.reduce((sum, rating) => sum + rating, 0) / satisfactionRatings.length;\n}\n\n// Yüzdelik hesaplamalar\nif (stats.totalMessages > 0) {\n  stats.percentages = {\n    positiveRate: (stats.positiveMessages / stats.totalMessages) * 100,\n    aiHandledRate: (stats.aiResponses / stats.totalMessages) * 100,\n    conversionRate: (stats.leadsGenerated / stats.totalConversations) * 100,\n    escalationRate: (stats.escalatedToHuman / stats.aiResponses) * 100\n  };\n}\n\nreturn [{ json: stats }];"
+      },
+      "id": "calculate-detailed-analytics-01",
+      "name": "Detaylı Analytics Hesapla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/analytics/daily-stats",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "save-daily-stats-01",
+      "name": "Günlük İstatistikleri Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "report-time-condition",
+              "leftValue": "={{ new Date().getHours() }}",
+              "rightValue": "18",
+              "operator": {
+                "type": "number",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "daily-report-check-01",
+      "name": "Günlük Rapor Zamanı mı?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Günlük özet raporu hazırla\nconst stats = items[0].json;\n\nconst report = {\n  companyId: stats.companyId,\n  companyName: stats.companyName,\n  date: stats.date,\n  type: 'daily_summary',\n  \n  summary: {\n    totalMessages: stats.totalMessages,\n    totalConversations: stats.totalConversations,\n    aiResponses: stats.aiResponses,\n    leadsGenerated: stats.leadsGenerated,\n    customerSatisfaction: Math.round(stats.customerSatisfaction * 10) / 10\n  },\n  \n  performance: {\n    aiSuccessRate: Math.round(stats.aiSuccessRate),\n    avgResponseTime: Math.round(stats.avgResponseTime),\n    escalationRate: Math.round(stats.percentages?.escalationRate || 0),\n    conversionRate: Math.round(stats.percentages?.conversionRate || 0)\n  },\n  \n  insights: [],\n  \n  recommendations: [],\n  \n  costs: {\n    totalTokens: stats.totalTokensUsed,\n    estimatedCost: Math.round(stats.estimatedCost * 100) / 100\n  }\n};\n\n// Otomatik insight'lar\nif (stats.comparison.messagesChange > 20) {\n  report.insights.push(`Mesaj hacmi düne göre %${Math.round(stats.comparison.messagesChange)} arttı`);\n}\n\nif (stats.percentages?.aiHandledRate > 80) {\n  report.insights.push(`Mesajların %${Math.round(stats.percentages.aiHandledRate)}'i AI tarafından başarıyla yanıtlandı`);\n}\n\nif (stats.escalatedToHuman > 5) {\n  report.insights.push(`${stats.escalatedToHuman} mesaj insan operatöre yönlendirildi`);\n}\n\n// Otomatik öneriler\nif (stats.avgResponseTime > 120) {\n  report.recommendations.push('Yanıt süresi optimizasyonu: AI modeli daha hızlı yanıt verecek şekilde ayarlanabilir');\n}\n\nif (stats.percentages?.escalationRate > 15) {\n  report.recommendations.push('Bilgi tabanı genişletme: Sık yönlendirilen konular için daha fazla bilgi eklenebilir');\n}\n\nif (stats.customerSatisfaction < 4) {\n  report.recommendations.push('Müşteri memnuniyeti: AI ton ve stil ayarları gözden geçirilmeli');\n}\n\nreturn [{ json: report }];"
+      },
+      "id": "generate-daily-report-01",
+      "name": "Günlük Rapor Oluştur",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1600, 250]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/reports/daily",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "save-daily-report-01",
+      "name": "Günlük Rapor Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1800, 250],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "alert-condition",
+              "leftValue": "={{ $('Detaylı Analytics Hesapla').item.json.percentages?.escalationRate || 0 }}",
+              "rightValue": "25",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],\n          "combinator": "or"\n        },\n        "options": {}\n      },\n      "id": "alert-check-01",\n      "name": "Uyarı Kontrolü",\n      "type": "n8n-nodes-base.if",\n      "typeVersion": 2,\n      "position": [1400, 450]\n    },\n    {\n      "parameters": {\n        "functionCode": "// Uyarı mesajları oluştur\nconst stats = items[0].json;\nconst alerts = [];\n\n// Yüksek escalation rate\nif (stats.percentages?.escalationRate > 25) {\n  alerts.push({\n    type: 'high_escalation',\n    severity: 'warning',\n    message: `${stats.companyName} için yüksek yönlendirme oranı: %${Math.round(stats.percentages.escalationRate)}`,\n    value: stats.percentages.escalationRate,\n    threshold: 25\n  });\n}\n\n// Düşük AI success rate\nif (stats.aiSuccessRate < 70) {\n  alerts.push({\n    type: 'low_ai_success',\n    severity: 'warning',\n    message: `${stats.companyName} için düşük AI başarı oranı: %${Math.round(stats.aiSuccessRate)}`,\n    value: stats.aiSuccessRate,\n    threshold: 70\n  });\n}\n\n// Yavaş yanıt süresi\nif (stats.avgResponseTime > 300) {\n  alerts.push({\n    type: 'slow_response',\n    severity: 'info',\n    message: `${stats.companyName} için yavaş yanıt süresi: ${Math.round(stats.avgResponseTime)} saniye`,\n    value: stats.avgResponseTime,\n    threshold: 300\n  });\n}\n\n// Yüksek token kullanımı\nif (stats.estimatedCost > 10) {\n  alerts.push({\n    type: 'high_cost',\n    severity: 'info',\n    message: `${stats.companyName} için yüksek token maliyeti: $${stats.estimatedCost}`,\n    value: stats.estimatedCost,\n    threshold: 10\n  });\n}\n\nreturn alerts.map(alert => ({\n  json: {\n    ...alert,\n    companyId: stats.companyId,\n    companyName: stats.companyName,\n    timestamp: new Date().toISOString()\n  }\n}));"
+      },
+      "id": "generate-alerts-01",
+      "name": "Uyarı Oluştur",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1600, 450]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/alerts",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "save-alert-01",
+      "name": "Uyarı Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1800, 450],
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Analytics Tetikleyici (15dk)": {
+      "main": [
+        [
+          {
+            "node": "Aktif Şirketleri Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aktif Şirketleri Al": {
+      "main": [
+        [
+          {
+            "node": "Şirketleri Ayır",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Şirketleri Ayır": {
+      "main": [
+        [
+          {
+            "node": "Konuşma Analitikleri Al",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Konuşma Analitikleri Al": {
+      "main": [
+        [
+          {
+            "node": "Detaylı Analytics Hesapla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detaylı Analytics Hesapla": {
+      "main": [
+        [
+          {
+            "node": "Günlük İstatistikleri Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Günlük İstatistikleri Kaydet": {
+      "main": [
+        [
+          {
+            "node": "Günlük Rapor Zamanı mı?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Uyarı Kontrolü",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Günlük Rapor Zamanı mı?": {
+      "main": [
+        [
+          {
+            "node": "Günlük Rapor Oluştur",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Günlük Rapor Oluştur": {
+      "main": [
+        [
+          {
+            "node": "Günlük Rapor Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uyarı Kontrolü": {
+      "main": [
+        [
+          {
+            "node": "Uyarı Oluştur",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Uyarı Oluştur": {
+      "main": [
+        [
+          {
+            "node": "Uyarı Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "analytics-v1",
+  "id": "analytics-dashboard",
+  "meta": {
+    "instanceId": "localhost"
+  },
+  "tags": [
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "1",
+      "name": "Analytics"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "2",
+      "name": "Dashboard"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "3",
+      "name": "Reporting"
+    }
+  ]
+}

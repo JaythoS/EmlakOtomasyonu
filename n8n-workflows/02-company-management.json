@@ -1,0 +1,520 @@
+{
+  "name": "Şirket ve Bilgi Tabanı Yönetimi",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "company-knowledge-update",
+        "options": {}
+      },
+      "id": "knowledge-webhook-01",
+      "name": "Bilgi Tabanı Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "company-knowledge-update"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Gelen bilgi güncelleme isteğini işle\nconst data = items[0].json;\n\n// İşlem tipini belirle\nconst operationType = data.action || 'unknown';\nconst companyId = data.companyId;\n\nlet processedData = {\n  companyId: companyId,\n  operationType: operationType,\n  timestamp: new Date().toISOString(),\n  ...data\n};\n\nswitch(operationType) {\n  case 'update_company_info':\n    processedData.updateType = 'company_profile';\n    break;\n  case 'add_knowledge':\n    processedData.updateType = 'knowledge_base';\n    break;\n  case 'update_ai_settings':\n    processedData.updateType = 'ai_configuration';\n    break;\n  case 'add_product':\n    processedData.updateType = 'product_catalog';\n    break;\n  case 'bulk_import':\n    processedData.updateType = 'bulk_data';\n    break;\n  default:\n    processedData.updateType = 'general';\n}\n\nreturn [{ json: processedData }];"
+      },
+      "id": "process-update-request-01",
+      "name": "Güncelleme İsteğini İşle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "company-info-condition",
+              "leftValue": "={{ $json.updateType }}",
+              "rightValue": "company_profile",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "update-type-router-01",
+      "name": "Güncelleme Tipi Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 200]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $json.companyId }}",
+        "httpMethod": "PUT",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.companyData) }}"
+      },
+      "id": "update-company-profile-01",
+      "name": "Şirket Profili Güncelle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 150]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "knowledge-condition",
+              "leftValue": "={{ $json.updateType }}",
+              "rightValue": "knowledge_base",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "knowledge-router-01",
+      "name": "Bilgi Tabanı Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Bilgi tabanı verilerini embedding için hazırla\nconst data = items[0].json;\nconst knowledgeItems = data.knowledgeData || [];\n\nconst processedItems = knowledgeItems.map(item => {\n  return {\n    companyId: data.companyId,\n    type: item.type || 'general',\n    title: item.title || '',\n    content: item.content || '',\n    metadata: {\n      category: item.category || 'general',\n      tags: item.tags || [],\n      priority: item.priority || 'normal',\n      lastUpdated: new Date().toISOString()\n    },\n    needsEmbedding: true\n  };\n});\n\nreturn processedItems.map(item => ({ json: item }));"
+      },
+      "id": "prepare-knowledge-data-01",
+      "name": "Bilgi Verilerini Hazırla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"input\": \"{{ $json.content }}\",\n  \"model\": \"text-embedding-ada-002\"\n}"
+      },
+      "id": "generate-embeddings-01",
+      "name": "Embedding Oluştur",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $json.companyId }}/knowledge-base",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"{{ $json.type }}\",\n  \"title\": \"{{ $json.title }}\",\n  \"content\": \"{{ $json.content }}\",\n  \"metadata\": {{ JSON.stringify($json.metadata) }},\n  \"embedding\": {{ JSON.stringify($('Embedding Oluştur').item.json.data[0].embedding) }}\n}"
+      },
+      "id": "save-knowledge-item-01",
+      "name": "Bilgi Öğesini Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ai-settings-condition",
+              "leftValue": "={{ $('Güncelleme İsteğini İşle').item.json.updateType }}",
+              "rightValue": "ai_configuration",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ai-settings-router-01",
+      "name": "AI Ayarları Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI ayarlarını doğrula ve işle\nconst data = items[0].json;\nconst aiSettings = data.aiSettings || {};\n\n// Varsayılan değerler\nconst processedSettings = {\n  provider: aiSettings.provider || 'openai',\n  model: aiSettings.model || 'gpt-3.5-turbo',\n  temperature: Math.max(0, Math.min(2, aiSettings.temperature || 0.7)),\n  maxTokens: Math.max(100, Math.min(4000, aiSettings.maxTokens || 500)),\n  tone: aiSettings.tone || 'professional-friendly',\n  language: aiSettings.language || 'turkish',\n  responseStyle: aiSettings.responseStyle || 'helpful-consultative',\n  escalationRules: aiSettings.escalationRules || [],\n  customInstructions: aiSettings.customInstructions || '',\n  autoReply: aiSettings.autoReply !== false,\n  businessHours: aiSettings.businessHours || {\n    enabled: false,\n    timezone: 'Europe/Istanbul',\n    schedule: {\n      monday: { start: '09:00', end: '18:00', enabled: true },\n      tuesday: { start: '09:00', end: '18:00', enabled: true },\n      wednesday: { start: '09:00', end: '18:00', enabled: true },\n      thursday: { start: '09:00', end: '18:00', enabled: true },\n      friday: { start: '09:00', end: '18:00', enabled: true },\n      saturday: { start: '10:00', end: '16:00', enabled: false },\n      sunday: { start: '10:00', end: '16:00', enabled: false }\n    }\n  },\n  updatedAt: new Date().toISOString()\n};\n\nreturn [{\n  json: {\n    companyId: data.companyId,\n    aiSettings: processedSettings\n  }\n}];"
+      },
+      "id": "process-ai-settings-01",
+      "name": "AI Ayarlarını İşle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 400]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $json.companyId }}/ai-settings",
+        "httpMethod": "PUT",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.aiSettings) }}"
+      },
+      "id": "save-ai-settings-01",
+      "name": "AI Ayarlarını Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "product-condition",
+              "leftValue": "={{ $('Güncelleme İsteğini İşle').item.json.updateType }}",
+              "rightValue": "product_catalog",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "product-router-01",
+      "name": "Ürün Kataloğu Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Ürün/hizmet verilerini işle\nconst data = items[0].json;\nconst products = data.productData || [];\n\nconst processedProducts = products.map(product => {\n  return {\n    companyId: data.companyId,\n    type: product.type || 'product',\n    name: product.name || '',\n    description: product.description || '',\n    price: product.price || null,\n    category: product.category || 'general',\n    specifications: product.specifications || {},\n    images: product.images || [],\n    availability: product.availability || 'available',\n    metadata: {\n      sku: product.sku || '',\n      tags: product.tags || [],\n      featured: product.featured || false,\n      createdAt: new Date().toISOString()\n    }\n  };\n});\n\nreturn processedProducts.map(product => ({ json: product }));"
+      },
+      "id": "process-product-data-01",
+      "name": "Ürün Verilerini İşle",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 500]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $json.companyId }}/products",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "save-product-01",
+      "name": "Ürünü Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Tüm işlemlerin sonuçlarını topla\nconst originalData = $('Güncelleme İsteğini İşle').item.json;\n\nlet results = {\n  companyId: originalData.companyId,\n  operationType: originalData.operationType,\n  updateType: originalData.updateType,\n  status: 'completed',\n  timestamp: new Date().toISOString(),\n  processedItems: 0,\n  errors: []\n};\n\n// Farklı tiplerden gelen sonuçları say\nif ($('Şirket Profili Güncelle')?.item?.json) {\n  results.companyProfileUpdated = true;\n  results.processedItems += 1;\n}\n\nif ($('Bilgi Öğesini Kaydet')?.item?.json) {\n  results.knowledgeItemsAdded = 1;\n  results.processedItems += 1;\n}\n\nif ($('AI Ayarlarını Kaydet')?.item?.json) {\n  results.aiSettingsUpdated = true;\n  results.processedItems += 1;\n}\n\nif ($('Ürünü Kaydet')?.item?.json) {\n  results.productsAdded = 1;\n  results.processedItems += 1;\n}\n\n// Hata kontrolü\ntry {\n  // Herhangi bir hata varsa yakala\n  if (results.processedItems === 0) {\n    results.status = 'failed';\n    results.errors.push('No items were processed');\n  }\n} catch (error) {\n  results.status = 'failed';\n  results.errors.push(error.message);\n}\n\nreturn [{ json: results }];"
+      },
+      "id": "aggregate-results-01",
+      "name": "Sonuçları Topla",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1400, 350]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/companies/{{ $json.companyId }}/sync-status",
+        "httpMethod": "POST",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "update-sync-status-01",
+      "name": "Senkron Durumu Güncelle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1600, 350],
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Bilgi Tabanı Webhook": {
+      "main": [
+        [
+          {
+            "node": "Güncelleme İsteğini İşle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Güncelleme İsteğini İşle": {
+      "main": [
+        [
+          {
+            "node": "Güncelleme Tipi Router",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Bilgi Tabanı Router",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI Ayarları Router",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ürün Kataloğu Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Güncelleme Tipi Router": {
+      "main": [
+        [
+          {
+            "node": "Şirket Profili Güncelle",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Şirket Profili Güncelle": {
+      "main": [
+        [
+          {
+            "node": "Sonuçları Topla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bilgi Tabanı Router": {
+      "main": [
+        [
+          {
+            "node": "Bilgi Verilerini Hazırla",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Bilgi Verilerini Hazırla": {
+      "main": [
+        [
+          {
+            "node": "Embedding Oluştur",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embedding Oluştur": {
+      "main": [
+        [
+          {
+            "node": "Bilgi Öğesini Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bilgi Öğesini Kaydet": {
+      "main": [
+        [
+          {
+            "node": "Sonuçları Topla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Ayarları Router": {
+      "main": [
+        [
+          {
+            "node": "AI Ayarlarını İşle",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "AI Ayarlarını İşle": {
+      "main": [
+        [
+          {
+            "node": "AI Ayarlarını Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Ayarlarını Kaydet": {
+      "main": [
+        [
+          {
+            "node": "Sonuçları Topla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ürün Kataloğu Router": {
+      "main": [
+        [
+          {
+            "node": "Ürün Verilerini İşle",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Ürün Verilerini İşle": {
+      "main": [
+        [
+          {
+            "node": "Ürünü Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ürünü Kaydet": {
+      "main": [
+        [
+          {
+            "node": "Sonuçları Topla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonuçları Topla": {
+      "main": [
+        [
+          {
+            "node": "Senkron Durumu Güncelle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "company-v1",
+  "id": "company-management",
+  "meta": {
+    "instanceId": "localhost"
+  },
+  "tags": [
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "1",
+      "name": "Company"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "2",
+      "name": "Management"
+    },
+    {
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-15T10:00:00.000Z",
+      "id": "3",
+      "name": "Knowledge-Base"
+    }
+  ]
+}
