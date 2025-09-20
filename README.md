@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🏠 Emlak CRM Frontend
 
-## Getting Started
+Bu proje, emlakçılar için geliştirilen **CRM + otomasyon + çoklu platform paylaşım** sisteminin **frontend (React + Next.js + TypeScript)** kısmıdır. Proje, kullanıcıların müşteri takibi, WhatsApp entegrasyonu, randevu yönetimi ve ilan paylaşımı gibi işlemleri kolayca yönetmesini sağlar.  
 
-First, run the development server:
+## 🚀 Kullanılan Teknolojiler
+- **Next.js** → React tabanlı framework (SSR & SSG desteği)  
+- **React** → Bileşen tabanlı frontend kütüphanesi  
+- **TypeScript** → Tip güvenliği  
+- **TailwindCSS** → Hızlı ve esnek UI tasarımı  
+- **Shadcn/UI** → Modern UI bileşenleri  
+- **Framer Motion** → Animasyon ve geçişler  
+- **React Query / Tanstack Query** → API veri yönetimi  
+- **React Hook Form + Zod** → Form yönetimi ve doğrulama  
+- **i18next** → Çoklu dil desteği (TR & EN)  
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 📂 Proje Yapısı
+```
+/src
+ ├── app/               # Next.js App Router yapısı
+ │   ├── dashboard/     # CRM dashboard sayfaları
+ │   ├── auth/          # Giriş / kayıt / şifre sıfırlama
+ │   ├── properties/    # Emlak ilanları listesi & yönetimi
+ │   ├── meetings/      # Randevu yönetimi
+ │   ├── customers/     # Müşteri yönetimi
+ │   └── settings/      # Profil & takım ayarları
+ │
+ ├── components/        # Ortak React bileşenleri
+ │   ├── ui/            # Shadcn UI custom bileşenler
+ │   ├── forms/         # Form bileşenleri
+ │   └── charts/        # Grafik & rapor bileşenleri
+ │
+ ├── hooks/             # Custom React hook'ları
+ ├── lib/               # Yardımcı fonksiyonlar, config dosyaları
+ ├── context/           # Global context (auth, tema, dil)
+ ├── styles/            # Global stiller
+ └── types/             # TypeScript tip tanımları
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🌟 Frontend Özellikleri
+- 📊 **CRM Dashboard** → Müşteri takibi, filtreleme (sıcak/soğuk lead)  
+- 📱 **WhatsApp mesaj entegrasyonu (UI tarafı)** → Mesaj geçmişi ve otomatik cevapların gösterimi  
+- 📅 **Randevu Yönetimi** → Takvim entegrasyonu ve toplantı takibi  
+- 📄 **Otomatik Doküman Görüntüleme** → PDF dosyalarının önizlenmesi  
+- 🎯 **Lead Skorlama** → AI puanlamalarının görselleştirilmesi (progress bar, etiket)  
+- 🏢 **Takım Yönetimi UI** → Kullanıcı rolleri, davet sistemi  
+- 🌍 **Çoklu Dil Desteği** → TR/EN switch  
+- 🎨 **Modern UI/UX** → Tailwind + Shadcn bileşenleri ile minimal ve profesyonel tasarım  
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 📦 Kurulum
+```bash
+# Bağımlılıkları yükle
+npm install
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Geliştirme sunucusunu başlat
+npm run dev
 
-## Learn More
+# Build al
+npm run build
 
-To learn more about Next.js, take a look at the following resources:
+# Production çalıştır
+npm start
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🔮 Yol Haritası (Frontend)
+- [ ] Dashboard prototipi oluşturma  
+- [ ] Auth sayfaları (login/register)  
+- [ ] Müşteri listesi & detay sayfası  
+- [ ] Randevu takvimi (Google Calendar entegrasyonu için UI)  
+- [ ] İlan paylaşım formu + preview ekranı  
+- [ ] Çoklu dil (TR/EN) switch  
+- [ ] Responsive tasarım (mobil/tablet/desktop)  
