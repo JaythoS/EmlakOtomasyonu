@@ -1,8 +1,60 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { findUserByEmail, addUser } from '@/lib/users-data';
+import jwt from 'jsonwebtoken';
+import { getUsers, addUser, findUserByEmail } from '@/lib/users-data';
 
+const JWT_SECRET = process.env.JWT_SECRET || 'admin-secret-key-here';
+
+// Admin token'ını doğrula
+function verifyAdminToken(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  const token = authHeader.substring(7);
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    return decoded.type === 'admin' ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+// Kullanıcıları listele (GET)
+export async function GET(request: NextRequest) {
+  const admin = verifyAdminToken(request);
+  if (!admin) {
+    return NextResponse.json(
+      { message: 'Yetkisiz erişim' },
+      { status: 401 }
+    );
+  }
+
+  const users = getUsers();
+  const safeUsers = users.map(user => ({
+    id: user.id,
+    email: user.email,
+    companyName: user.companyName,
+    fullName: user.fullName,
+    phone: user.phone,
+    isActive: user.isActive,
+    createdAt: user.createdAt.toISOString()
+  }));
+
+  return NextResponse.json({ users: safeUsers });
+}
+
+// Yeni kullanıcı ekle (POST)
 export async function POST(request: NextRequest) {
+  const admin = verifyAdminToken(request);
+  if (!admin) {
+    return NextResponse.json(
+      { message: 'Yetkisiz erişim' },
+      { status: 401 }
+    );
+  }
+
   try {
     const { companyName, email, fullName, phone, password } = await request.json();
 
@@ -54,13 +106,8 @@ export async function POST(request: NextRequest) {
       createdAt: new Date()
     });
 
-    // Burada normalde:
-    // 1. Veritabanına kayıt
-    // 2. Şirket için ayrı database oluşturma
-    // 3. Domain/subdomain ayarlama işlemleri yapılacak
-
     return NextResponse.json({
-      message: 'Kayıt başarılı',
+      message: 'Kullanıcı başarıyla eklendi',
       user: {
         id: newUser.id,
         email: newUser.email,
@@ -70,7 +117,7 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Register error:', error);
+    console.error('Add user error:', error);
     return NextResponse.json(
       { message: 'Sunucu hatası' },
       { status: 500 }

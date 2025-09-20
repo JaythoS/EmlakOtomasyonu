@@ -90,11 +90,8 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6 text-center">
-            <p className="text-gray-400">
-              Hesabınız yok mu?{' '}
-              <Link href="/auth/register" className="text-blue-400 hover:text-blue-300">
-                Kayıt olun
-              </Link>
+            <p className="text-gray-400 text-sm">
+              Hesap bilgilerinizi sistem yöneticinizden alabilirsiniz.
             </p>
           </div>
         </div>
