@@ -12,7 +12,9 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "next": "15.5.3",
-    "lucide-react": "^0.460.0"
+    "lucide-react": "^0.460.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3"
   },
   "devDependencies": {
     "typescript": "^5",
@@ -23,6 +25,8 @@
     "tailwindcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "15.5.3",
-    "@eslint/eslintrc": "^3"
+    "@eslint/eslintrc": "^3",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/bcryptjs": "^2.4.6"
   }
 }
