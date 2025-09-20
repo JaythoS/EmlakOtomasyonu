@@ -1,20 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-
-// Geçici olarak in-memory database kullanıyoruz
-// Gerçek uygulamada burada veritabanı bağlantısı olacak
-const users = [
-  {
-    id: 1,
-    email: 'test@test.com',
-    password: '$2a$10$vqNjHhIQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQ', // test123
-    companyName: 'Test Şirketi',
-    fullName: 'Test Kullanıcı',
-    phone: '555-123-4567',
-    isActive: true
-  }
-];
+import { findUserByEmail } from '@/lib/users-data';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here';
 
@@ -30,7 +17,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Kullanıcıyı bul
-    const user = users.find(u => u.email === email);
+    const user = findUserByEmail(email);
     if (!user) {
       return NextResponse.json(
         { message: 'Geçersiz e-posta veya şifre' },

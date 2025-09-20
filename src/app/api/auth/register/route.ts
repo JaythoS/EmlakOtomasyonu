@@ -1,20 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-
-// Geçici olarak in-memory database kullanıyoruz
-// Gerçek uygulamada burada veritabanı bağlantısı olacak
-let users = [
-  {
-    id: 1,
-    email: 'test@test.com',
-    password: '$2a$10$vqNjHhIQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQZ5YhQ', // test123
-    companyName: 'Test Şirketi',
-    fullName: 'Test Kullanıcı',
-    phone: '555-123-4567',
-    isActive: true,
-    createdAt: new Date()
-  }
-];
+import { findUserByEmail, addUser } from '@/lib/users-data';
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
 
     // E-posta daha önce kullanılmış mı?
-    const existingUser = users.find(u => u.email === email);
+    const existingUser = findUserByEmail(email);
     if (existingUser) {
       return NextResponse.json(
         { message: 'Bu e-posta adresi zaten kullanılıyor' },
@@ -58,8 +44,7 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Yeni kullanıcı oluştur
-    const newUser = {
-      id: users.length + 1,
+    const newUser = addUser({
       email,
       password: hashedPassword,
       companyName,
@@ -67,9 +52,7 @@ export async function POST(request: NextRequest) {
       phone,
       isActive: true,
       createdAt: new Date()
-    };
-
-    users.push(newUser);
+    });
 
     // Burada normalde:
     // 1. Veritabanına kayıt
