@@ -2,15 +2,27 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, MessageCircle, Building, Settings, Phone } from 'lucide-react';
+import { useState } from 'react';
+import { 
+  Home, 
+  MessageCircle, 
+  Building, 
+  Settings, 
+  Phone, 
+  BarChart3,
+  Menu,
+  X,
+  User
+} from 'lucide-react';
 
 const Navigation = () => {
   const pathname = usePathname();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const navigationItems = [
     {
-      name: 'Ana Sayfa',
-      href: '/',
+      name: 'Dashboard',
+      href: '/dashboard',
       icon: Home,
     },
     {
@@ -18,16 +30,17 @@ const Navigation = () => {
       href: '/whatsapp',
       icon: MessageCircle,
     },
-    {
-      name: 'Soğuk Arama',
-      href: '/cold-calling',
-      icon: Phone,
-    },
-    {
-      name: 'Mülkler',
-      href: '/properties',
-      icon: Building,
-    },
+    // MVP için gizlendi - ileride aktifleştirilecek
+    // {
+    //   name: 'Soğuk Arama',
+    //   href: '/cold-calling',
+    //   icon: Phone,
+    // },
+    // {
+    //   name: 'Mülkler',
+    //   href: '/properties',
+    //   icon: Building,
+    // },
     {
       name: 'Ayarlar',
       href: '/settings',
@@ -36,66 +49,152 @@ const Navigation = () => {
   ];
 
   return (
-    <nav className="bg-white shadow-sm border-b">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          <div className="flex">
-            <div className="flex-shrink-0 flex items-center">
-              <Building className="h-8 w-8 text-blue-600" />
-              <span className="ml-2 text-xl font-bold text-gray-900">Emlak Otomasyonu</span>
+    <>
+      {/* Desktop Sidebar */}
+      <div className="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
+        <div className="flex grow flex-col gap-y-5 overflow-y-auto bg-sidebar px-6 pb-4 shadow-lg">
+          {/* Logo */}
+          <div className="flex h-16 shrink-0 items-center">
+            <Building className="h-8 w-8 text-blue-400" />
+            <span className="ml-3 text-xl font-bold text-white">Emlak Otomasyonu</span>
+          </div>
+
+          {/* User Profile */}
+          <div className="modern-card p-4 mb-4">
+            <div className="flex items-center">
+              <div className="h-10 w-10 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 flex items-center justify-center">
+                <User className="h-5 w-5 text-white" />
+              </div>
+              <div className="ml-3">
+                <p className="text-sm font-medium text-white">Hoş geldin, Admin</p>
+                <p className="text-xs text-gray-400">Emlak Uzmanı</p>
+              </div>
             </div>
-            <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-              {navigationItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = pathname === item.href;
-                
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className={`${
-                      isActive
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                    } inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium`}
-                  >
-                    <Icon className="h-4 w-4 mr-2" />
-                    {item.name}
-                  </Link>
-                );
-              })}
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex flex-1 flex-col">
+            <ul role="list" className="flex flex-1 flex-col gap-y-7">
+              <li>
+                <ul role="list" className="-mx-2 space-y-1">
+                  {navigationItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = pathname === item.href;
+                    
+                    return (
+                      <li key={item.name}>
+                        <Link
+                          href={item.href}
+                          className={`${
+                            isActive
+                              ? 'bg-blue-900 text-blue-300 border-r-2 border-blue-400'
+                              : 'text-gray-300 hover:text-blue-300 hover:bg-gray-700'
+                          } group flex gap-x-3 rounded-lg p-3 text-sm leading-6 font-medium transition-all duration-200`}
+                        >
+                          <Icon className={`${
+                            isActive ? 'text-blue-400' : 'text-gray-400 group-hover:text-blue-400'
+                          } h-5 w-5 shrink-0`} />
+                          {item.name}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            </ul>
+          </nav>
+
+          {/* Stats Card */}
+          <div className="modern-card p-4 stat-card-gradient-1 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm opacity-90">Bu ay</p>
+                <p className="text-2xl font-bold">47</p>
+                <p className="text-xs opacity-75">Emlak satışı</p>
+              </div>
+              <BarChart3 className="h-8 w-8 opacity-80" />
+            </div>
+            <div className="mt-3 bg-white bg-opacity-20 rounded-full h-2">
+              <div className="bg-white h-2 rounded-full w-3/5"></div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Mobile menu */}
-      <div className="sm:hidden">
-        <div className="pt-2 pb-3 space-y-1">
-          {navigationItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = pathname === item.href;
-            
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={`${
-                  isActive
-                    ? 'bg-blue-50 border-blue-500 text-blue-700'
-                    : 'border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700'
-                } block pl-3 pr-4 py-2 border-l-4 text-base font-medium`}
-              >
-                <div className="flex items-center">
-                  <Icon className="h-4 w-4 mr-3" />
-                  {item.name}
-                </div>
-              </Link>
-            );
-          })}
+      {/* Mobile Header */}
+      <div className="sticky top-0 z-40 flex items-center gap-x-6 bg-sidebar px-4 py-4 shadow-sm sm:px-6 lg:hidden">
+        <button
+          type="button"
+          className="-m-2.5 p-2.5 text-gray-300 lg:hidden"
+          onClick={() => setIsMobileMenuOpen(true)}
+          aria-label="Menüyü aç"
+        >
+          <Menu className="h-6 w-6" />
+        </button>
+        <div className="flex-1 text-sm font-semibold leading-6 text-white">
+          <Building className="h-6 w-6 text-blue-400 inline mr-2" />
+          Emlak Otomasyonu
         </div>
       </div>
-    </nav>
+
+      {/* Mobile Menu */}
+      {isMobileMenuOpen && (
+        <div className="relative z-50 lg:hidden">
+          <div className="fixed inset-0 bg-gray-900/80"></div>
+          <div className="fixed inset-0 flex">
+            <div className="relative mr-16 flex w-full max-w-xs flex-1">
+              <div className="absolute left-full top-0 flex w-16 justify-center pt-5">
+                <button
+                  type="button"
+                  className="-m-2.5 p-2.5"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  aria-label="Menüyü kapat"
+                >
+                  <X className="h-6 w-6 text-white" />
+                </button>
+              </div>
+              <div className="flex grow flex-col gap-y-5 overflow-y-auto bg-sidebar px-6 pb-4">
+                <div className="flex h-16 shrink-0 items-center">
+                  <Building className="h-8 w-8 text-blue-400" />
+                  <span className="ml-3 text-xl font-bold text-white">Emlak Otomasyonu</span>
+                </div>
+                <nav className="flex flex-1 flex-col">
+                  <ul role="list" className="flex flex-1 flex-col gap-y-7">
+                    <li>
+                      <ul role="list" className="-mx-2 space-y-1">
+                        {navigationItems.map((item) => {
+                          const Icon = item.icon;
+                          const isActive = pathname === item.href;
+                          
+                          return (
+                            <li key={item.name}>
+                              <Link
+                                href={item.href}
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                className={`${
+                                  isActive
+                                    ? 'bg-blue-900 text-blue-300'
+                                    : 'text-gray-300 hover:text-blue-300 hover:bg-gray-700'
+                                } group flex gap-x-3 rounded-lg p-3 text-sm leading-6 font-medium`}
+                              >
+                                <Icon className={`${
+                                  isActive ? 'text-blue-400' : 'text-gray-400 group-hover:text-blue-400'
+                                } h-5 w-5 shrink-0`} />
+                                {item.name}
+                              </Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </li>
+                  </ul>
+                </nav>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
